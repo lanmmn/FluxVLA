@@ -14,7 +14,7 @@
 
 model = dict(
     type='PI05FlowMatching',
-    mini_batches=2,
+    mini_batches=1,
     llm_backbone=dict(
         type='ConditionGemmaModel',
         adarms_cond_dim=None,

@@ -163,6 +163,10 @@ class BaseTrainRunner(ABC):
         self.optimizer, self.lr_scheduler = None, None
         self.wandb_mode = os.environ.get('WANDB_MODE', 'online')
         self.resume_from = resume_from
+        # Profiler: set FLUXVLA_PROFILE_STEPS=N to profile N active steps
+        self._profiler = None
+        self._profiler_active_steps = int(
+            os.environ.get('FLUXVLA_PROFILE_STEPS', '0'))
         # Track if optimizer state was successfully loaded
         self.optimizer_state_loaded = False
         # Store lr_schedule for step-based scheduler
@@ -180,6 +184,67 @@ class BaseTrainRunner(ABC):
                 'Only BF16 mixed precision training is supported!'
             assert check_bloat16_supported(), \
                 'BFloat16 is not supported on this hardware; unset `mixed_precision`'  # noqa: E501
+
+    def _setup_profiler(self) -> None:
+        """Setup PyTorch Profiler. Activated via FLUXVLA_PROFILE_STEPS=N env var.
+
+        Profiles N active steps (after 1 wait + 1 warmup), saves a Chrome
+        trace JSON and logs a key-averages table to wandb.
+        """
+        if self._profiler_active_steps <= 0 or not overwatch.is_rank_zero():
+            return
+
+        from torch.profiler import (ProfilerActivity, profile, schedule)
+        import wandb
+
+        prof_dir = os.path.join(self.metric.run_dir, 'profiler')
+        os.makedirs(prof_dir, exist_ok=True)
+
+        def on_trace_ready(p):
+            step = self.metric.global_step
+            trace_path = os.path.join(prof_dir, f'trace_step{step}.json')
+            p.export_chrome_trace(trace_path)
+            overwatch.info(f'Profiler trace saved to {trace_path}')
+
+            if wandb.run is not None:
+                key_avgs = p.key_averages()
+                table_data = sorted(
+                    [[e.key,
+                      round(e.cpu_time_total / 1000, 2),
+                      round(e.cuda_time_total / 1000, 2),
+                      e.count,
+                      round(e.cuda_memory_usage / 1024**2, 2)]
+                     for e in key_avgs if e.cuda_time_total > 0],
+                    key=lambda x: -x[2])
+                wandb.log(
+                    {'profiler/key_averages': wandb.Table(
+                        columns=['op', 'cpu_ms', 'cuda_ms', 'count',
+                                 'cuda_mem_mb'],
+                        data=table_data[:30])},
+                    step=step)
+
+        active = self._profiler_active_steps
+        self._profiler = profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=schedule(wait=1, warmup=1, active=active, repeat=1),
+            on_trace_ready=on_trace_ready,
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=False,
+        )
+        self._profiler.start()
+        overwatch.info(
+            f'Profiler started: wait=1, warmup=1, active={active} steps')
+
+    def _profiler_step(self) -> None:
+        """Advance profiler by one step. Stops after scheduled steps finish."""
+        if self._profiler is None or not overwatch.is_rank_zero():
+            return
+        self._profiler.step()
+        # wait=1, warmup=1, active=N → done after N+2 steps
+        if self.metric.global_step >= self._profiler_active_steps + 2:
+            self._profiler.stop()
+            self._profiler = None
 
     def _convert_batch_to_dtype(self, batch: Dict, dtype: torch.dtype) -> Dict:
         """Convert floating point tensors in batch to specified dtype.
@@ -610,6 +675,7 @@ class BaseTrainRunner(ABC):
         # Dispatch to training mode specific loop
         self.vla.train()
         self.optimizer.zero_grad()
+        self._setup_profiler()
 
         if self.training_mode == 'step_based':
             return self._run_step_based(dataloader, sampler)
@@ -657,6 +723,7 @@ class BaseTrainRunner(ABC):
                     lr=self.lr_scheduler.get_last_lr()[0])
                 progress.set_description(self.metric.push())
                 progress.update()
+                self._profiler_step()
 
                 # Save checkpoint
                 if self._should_save_step_checkpoint():
@@ -722,6 +789,7 @@ class BaseTrainRunner(ABC):
                             lr=self.lr_scheduler.get_last_lr()[0])
                         iter_pbar.set_description(self.metric.push())
                         iter_pbar.update()
+                        self._profiler_step()
 
                         # For infinite dataloaders: end epoch by step count
                         if (self.steps_per_epoch
