@@ -14,7 +14,7 @@ def get_attention_interface(self):
         attention_interface = eager_attention_forward  # ← 当前唯一可用
 ```
 
----
+______________________________________________________________________
 
 ## 2. 技术原理
 
@@ -26,12 +26,13 @@ def get_attention_interface(self):
 Attention(Q, K, V) = softmax(Q @ K^T / √d) @ V
 ```
 
-**计算复杂度**：O(N² · d)  
+**计算复杂度**：O(N² · d)
 **显存复杂度**：O(N²)（需要存储完整的 N×N 注意力矩阵）
 
 对于 Pi0.5，Joint Attention 的序列长度 N = prefix_len + suffix_len ≈ 300-500 tokens，加上 GQA expand（1→8 heads），生成的注意力矩阵 shape 为 `(B, 8, N, N)`，在 bf16 下约占 **N² × 8 × 2 bytes**。
 
 关键问题：
+
 1. **HBM 带宽瓶颈**：Q @ K^T 的中间结果需要写入 HBM，再读回来做 softmax，再写入 HBM，再读回来做 @ V —— **3 次 HBM 读写**
 2. **显存浪费**：完整的 N×N 注意力矩阵常驻显存
 3. **无法利用 Tensor Core 的 tiling 优势**
@@ -59,11 +60,13 @@ FlashAttention-2 的核心优化是 **IO-Aware Tiling**：
 ```
 
 **关键技术**：
+
 - **Online Softmax**：在 tiling 过程中增量计算 softmax，无需全局 attention 矩阵
 - **Kernel Fusion**：matmul + softmax + matmul 融合为单个 CUDA kernel
 - **SRAM Tiling**：利用 GPU SRAM（共享内存，带宽 ~19 TB/s）替代 HBM（带宽 ~3 TB/s）
 
 **效果**：
+
 - 显存：O(N²) → **O(N)**（不再存储完整注意力矩阵）
 - 速度：减少 HBM 访问次数，**2-4x 加速**（IO-bound 场景更显著）
 
@@ -80,7 +83,7 @@ F.scaled_dot_product_attention(Q, K, V, attn_mask)
 
 优势：支持 **任意 bool 类型 attention mask**，同时仍能获得优化后端的加速。
 
----
+______________________________________________________________________
 
 ## 3. Pi0.5 Joint Attention 的特殊挑战
 
@@ -104,6 +107,7 @@ act₂..actₙ     ✓     ✓     ✓      ✓      ✓  (彼此双向)
 ```
 
 关键特征：
+
 - **Prefix 块**：完全双向（image 和 language tokens 互相可见）
 - **State**：因果边界（能看 prefix，不能看 actions）
 - **Action 块**：除 act₁ 外，**彼此双向**（能看到所有 prefix+state+actions）
@@ -123,6 +127,7 @@ act₂             ✓     ✓     ✓     ✓      ✓     ✓
 ```
 
 **差异**：
+
 1. Prefix 内 image tokens 变成单向（img₁ 看不到 img₂），破坏了 image-language fusion
 2. Action tokens 变成严格因果（act₁ 看不到 act₂），破坏了 action 间双向注意力
 
@@ -139,7 +144,7 @@ head_dim = 256
 - SDPA：通过 `enable_gqa=True` 原生支持，无需扩展
 - flash_attn：原生支持不同 Q/KV head 数
 
----
+______________________________________________________________________
 
 ## 4. 方案设计：双后端策略
 
@@ -155,11 +160,11 @@ attention_implementation config
 
 ### 4.2 性能对比预估
 
-| 后端 | API | Mask 支持 | 预估加速 | Mask 保真度 | 推荐场景 |
-|------|-----|----------|---------|------------|---------|
-| **eager** | `torch.matmul` | 任意 4D mask | 1x (baseline) | 精确 | 调试 |
-| **sdpa** | `F.scaled_dot_product_attention` | 任意 bool mask | **~5-10x** | **精确** | **训练默认** |
-| **fa2** | `flash_attn_func` | 仅 causal | **~20-75x** | 近似 | 推理/实验 |
+| 后端      | API                              | Mask 支持      | 预估加速      | Mask 保真度 | 推荐场景     |
+| --------- | -------------------------------- | -------------- | ------------- | ----------- | ------------ |
+| **eager** | `torch.matmul`                   | 任意 4D mask   | 1x (baseline) | 精确        | 调试         |
+| **sdpa**  | `F.scaled_dot_product_attention` | 任意 bool mask | **~5-10x**    | **精确**    | **训练默认** |
+| **fa2**   | `flash_attn_func`                | 仅 causal      | **~20-75x**   | 近似        | 推理/实验    |
 
 ### 4.3 推荐配置
 
@@ -179,7 +184,7 @@ model = dict(
 )
 ```
 
----
+______________________________________________________________________
 
 ## 5. 详细实现方案
 
@@ -227,6 +232,7 @@ def sdpa_attention_forward(
 ```
 
 **关键设计决策**：
+
 - 使用 **bool mask** 而非 additive mask：SDPA 对 bool mask 可以走 FlashAttention 或 memory-efficient 后端
 - `enable_gqa=True`：PyTorch 2.5+ 支持，自动处理 Hq=8, Hkv=1
 - 返回 `None` 作为 attn_weights：调用方 `_forward_transformer_layers` line 402 已用 `_, _` 丢弃
@@ -267,6 +273,7 @@ def flash_attention_forward(
 ```
 
 **注意**：
+
 - `flash_attn_func` 原生接受不同的 Q/KV head 数，无需 `repeat_kv`
 - `attention_mask` 被忽略（flash_attn 2.5.x 不支持自定义 mask）
 - 输出已经是 `(B, L, H, D)` 格式，与 eager 的 `.transpose(1, 2).contiguous()` 后一致
@@ -303,13 +310,14 @@ att_output = att_output.reshape(batch_size, -1, 1 * 8 * head_dim)
 ```
 
 三种后端的输出都是 `(B, L, H, D)` 即 `(B, L, 8, 256)` 格式：
+
 - **eager**：`.transpose(1, 2).contiguous()` → `(B, L, H, D)` ✓
-- **sdpa**：`.transpose(1, 2).contiguous()` → `(B, L, H, D)` ✓  
+- **sdpa**：`.transpose(1, 2).contiguous()` → `(B, L, H, D)` ✓
 - **fa2**：flash_attn 直接输出 `(B, L, H, D)` ✓
 
 reshape 到 `(B, L, 8*256)` = `(B, L, 2048)` 后进入各自的 `o_proj`，**无需任何修改**。
 
----
+______________________________________________________________________
 
 ## 6. 测试方案
 
@@ -342,24 +350,25 @@ def test_sdpa_with_gradient_checkpointing():
     # 验证 loss.backward() 不报错
 ```
 
----
+______________________________________________________________________
 
 ## 7. 改动范围总结
 
-| 文件 | 改动类型 | 说明 |
-|------|---------|------|
-| `fluxvla/engines/utils/model_utils.py` | **新增** 2 个函数 | `sdpa_attention_forward`, `flash_attention_forward` |
-| `fluxvla/models/vlas/pi0_flowmatching.py` | **修改** 1 个函数 | `get_attention_interface` 添加 sdpa/fa2 分支 |
-| `test/test_ops/test_flashattn.py` | **新增** 3 个测试 | 数值一致性、输出合理性、gradient checkpointing |
+| 文件                                      | 改动类型          | 说明                                                |
+| ----------------------------------------- | ----------------- | --------------------------------------------------- |
+| `fluxvla/engines/utils/model_utils.py`    | **新增** 2 个函数 | `sdpa_attention_forward`, `flash_attention_forward` |
+| `fluxvla/models/vlas/pi0_flowmatching.py` | **修改** 1 个函数 | `get_attention_interface` 添加 sdpa/fa2 分支        |
+| `test/test_ops/test_flashattn.py`         | **新增** 3 个测试 | 数值一致性、输出合理性、gradient checkpointing      |
 
 **不需要改动**：
+
 - `_forward_transformer_layers` —— 通过函数指针切换，零结构变更
 - `make_att_2d_masks` / `_prepare_attention_masks_4d` —— mask 构建保持不变
 - `PI05FlowMatching` —— 继承父类变更
 - `condition_gemma.py` —— 其 attention 路径与 joint attention 独立
 - 训练配置 —— 只需将 `attention_implementation` 从 `'eager'` 改为 `'sdpa'`
 
----
+______________________________________________________________________
 
 ## 8. 风险和注意事项
 

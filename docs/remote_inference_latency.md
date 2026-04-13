@@ -4,7 +4,7 @@
 
 | 项目 | 值 |
 |------|-----|
-| 模型 | PI05FlowMatching (mini-diffuser) |
+| 模型 | PI05FlowMatching |
 | Checkpoint | `step-012688-epoch-08-loss=0.0492.pt` (~40GB) |
 | 任务集 | libero_10 (10 tasks × 5 trials = 50 episodes) |
 | Server | GPU:0 (A100 80GB), bf16, gRPC port 50051 |
@@ -79,7 +79,7 @@ Client                                              Server
 1. **远程推理 overhead 极小**：相比本地推理（~530ms），远程推理仅增加 ~5ms（序列化 + 网络），不到 1% 的额外开销。
 2. **序列化效率高**：`torch.save`/`torch.load` 在 ~1.2MB payload 下序列化耗时 < 2ms，无需考虑压缩或更复杂的序列化方案。
 3. **网络不是瓶颈**：同机通信（localhost）~6ms 往返。跨机器内网（千兆+）预计 < 10ms，对总延迟影响仍然很小。
-4. **优化方向应聚焦于模型推理本身**：如 mini-diffuser 减少去噪步数、模型量化、TensorRT 编译等。
+4. **优化方向应聚焦于模型推理本身**：如减少去噪步数、模型量化、TensorRT 编译等。
 
 ### 4.3 与本地推理对比
 

@@ -3,6 +3,7 @@
 基于 ZeroMQ + msgpack 的远程 VLA 推理框架。模型推理和数据预处理部署在 GPU 服务器上，客户端只需发送 raw observation（JPEG 图像 + 关节状态），无需加载 tokenizer 或 image processor。
 
 支持的 Runner：
+
 - `AlohaInferenceRunner` — ALOHA 双臂机器人
 - `URInferenceRunner` — UR3/UR5 机械臂
 - `AlohaRTCInferenceRunner` — ALOHA + RTC 实时控制
@@ -52,6 +53,7 @@ python zmq_msgpack/serve_vla_zmq.py \
 ```
 
 Server 启动时会自动从 config 中构建 dataset 预处理管道（加载 tokenizer 等），并打印：
+
 ```
 [serve_vla_zmq] Dataset pipeline built from cfg.inference.dataset
 [serve_vla_zmq] Model on cuda:0 (bf16), ready to serve.
@@ -59,15 +61,15 @@ Server 启动时会自动从 config 中构建 dataset 预处理管道（加载 t
 
 **参数说明：**
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--config` | (必填) | mmengine config 文件路径 |
-| `--ckpt-path` | (必填) | 模型 checkpoint 路径 |
-| `--host` | `0.0.0.0` | 监听地址 |
-| `--port` | `5555` | 监听端口 |
-| `--device` | `cuda:0` | 推理设备 |
-| `--dtype` | `bf16` | 精度类型（bf16/fp16/fp32） |
-| `--dataset-key` | 自动检测 | 从哪个 config key 读 dataset（`inference` 或 `eval`） |
+| 参数            | 默认值    | 说明                                                  |
+| --------------- | --------- | ----------------------------------------------------- |
+| `--config`      | (必填)    | mmengine config 文件路径                              |
+| `--ckpt-path`   | (必填)    | 模型 checkpoint 路径                                  |
+| `--host`        | `0.0.0.0` | 监听地址                                              |
+| `--port`        | `5555`    | 监听端口                                              |
+| `--device`      | `cuda:0`  | 推理设备                                              |
+| `--dtype`       | `bf16`    | 精度类型（bf16/fp16/fp32）                            |
+| `--dataset-key` | 自动检测  | 从哪个 config key 读 dataset（`inference` 或 `eval`） |
 
 ### 2. 配置 Client
 
@@ -165,13 +167,13 @@ torchrun --nnodes 1 --nproc_per_node 2 scripts/train.py \
 
 ## Client 端启动对比
 
-| | 无 remote | remote（旧） | remote（新） |
-|---|---|---|---|
-| 加载模型权重 | Yes | No | No |
-| 加载 tokenizer | Yes | Yes | **No** |
-| 加载 image processor | Yes | Yes | **No** |
-| 构建 dataset pipeline | Yes | Yes | **No** |
-| 启动时间 | ~60s | ~30s | **<5s** |
+|                       | 无 remote | remote（旧） | remote（新） |
+| --------------------- | --------- | ------------ | ------------ |
+| 加载模型权重          | Yes       | No           | No           |
+| 加载 tokenizer        | Yes       | Yes          | **No**       |
+| 加载 image processor  | Yes       | Yes          | **No**       |
+| 构建 dataset pipeline | Yes       | Yes          | **No**       |
+| 启动时间              | ~60s      | ~30s         | **\<5s**     |
 
 ## Config 字段说明
 
@@ -188,6 +190,7 @@ remote_inference=dict(
 ## Profiling
 
 客户端每 50 次调用打印性能统计：
+
 ```
 [RemoteVLAZmq profiling] calls=50  avg_total=95.2ms  avg_serialize=1.2ms
   avg_zmq_roundtrip=92.5ms  avg_server_infer=85.3ms  avg_deserialize=1.5ms
@@ -195,6 +198,7 @@ remote_inference=dict(
 ```
 
 Server 端每 50 次请求打印：
+
 ```
 [ZMQ VLAServer] req=50  deserialize=0.8ms  preprocess=5.2ms  infer=82.1ms
   serialize=0.3ms  avg_infer=82.5ms

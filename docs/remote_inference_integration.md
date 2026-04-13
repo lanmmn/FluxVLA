@@ -141,7 +141,7 @@ OK
 
 | 项目 | 值 |
 |------|-----|
-| 模型 | PI05FlowMatching (mini-diffuser) |
+| 模型 | PI05FlowMatching |
 | Checkpoint | `step-012688-epoch-08-loss=0.0492.pt` (~40GB) |
 | 任务集 | libero_10 (10 tasks x 2 trials = 20 episodes) |
 | Server | GPU:0 (A100 80GB), bf16, gRPC port 50051 |

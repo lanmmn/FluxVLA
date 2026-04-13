@@ -103,7 +103,7 @@ $ python -m pytest zmq_msgpack/test_server_client.py -v
 
 | 项目 | 值 |
 |------|-----|
-| 模型 | PI05FlowMatching (mini-diffuser) |
+| 模型 | PI05FlowMatching |
 | Checkpoint | `step-012688-epoch-08-loss=0.0492.pt` (~40GB) |
 | 任务集 | libero_10 (10 tasks × 2 trials = 20 episodes) |
 | Server | GPU:0 (A100 80GB), bf16, ZMQ port 5555 |
