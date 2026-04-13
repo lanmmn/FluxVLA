@@ -200,6 +200,16 @@ Server 端每 50 次请求打印：
   serialize=0.3ms  avg_infer=82.5ms
 ```
 
+## 测试
+
+运行集成测试（无需 checkpoint，使用 mock model）：
+
+```bash
+python -m fluxvla.remote.test_remote_inference
+```
+
+测试覆盖：ObsSerializer 序列化/反序列化、Aloha 3-cam 端到端、UR3 2-cam 端到端、Libero tuple-dataset 端到端。
+
 ## 注意事项
 
 1. **ckpt_path 仍需提供**：客户端用它定位 `dataset_statistics.json`（denormalize 需要），但不加载模型
