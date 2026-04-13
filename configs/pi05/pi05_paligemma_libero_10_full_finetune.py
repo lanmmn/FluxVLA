@@ -206,6 +206,13 @@ runner = dict(
 
 eval = dict(
     type='LiberoEvalRunner',
+    remote_inference=dict(
+        enabled=False,       # Set True to use remote GPU server for inference
+        backend='zmq',      # 'grpc' or 'zmq'
+        host='0.0.0.0',    # server address
+        port=5555,          # server port (grpc: 50051, zmq: 5555)
+        timeout_s=30.0,      # per-request timeout (seconds)
+    ),
     task_suite_name='libero_10',
     model_family='pi0',
     eval_chunk_size=10,

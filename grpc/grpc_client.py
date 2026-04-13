@@ -1,13 +1,12 @@
 """gRPC client for VLA inference service."""
 from __future__ import annotations
-
 import time
 from typing import Generator, Iterator
 
-import grpc
-
 import vla_service_pb2
 import vla_service_pb2_grpc
+
+import grpc
 
 
 class GRPCInferClient:

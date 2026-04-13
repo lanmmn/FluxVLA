@@ -40,6 +40,18 @@ message CameraConfig {
 // Request to get server's camera configuration
 message CameraConfigRequest {}
 
+// Serialized tensor batch for preprocessed model inputs (torch.save format)
+message TensorBatchInferRequest {
+  bytes batch_data = 1;    // torch.save'd dict of tensors (images, lang_tokens, states, etc.)
+  string unnorm_key = 2;   // denormalization key (e.g. "libero_10")
+}
+
+// Serialized tensor response
+message TensorBatchInferResponse {
+  bytes action_data = 1;   // torch.save'd action tensor
+  double infer_time = 2;   // server-side inference time (seconds)
+}
+
 // Empty message for status stream initiation
 message StatusRequest {
   double interval_s = 1;  // desired status update interval (seconds)
@@ -58,4 +70,7 @@ service VLAService {
 
   // Unary RPC: query server's expected camera configuration
   rpc GetCameraConfig(CameraConfigRequest) returns (CameraConfig);
+
+  // Unary RPC: tensor-batch inference for preprocessed model inputs
+  rpc TensorBatchInfer(TensorBatchInferRequest) returns (TensorBatchInferResponse);
 }

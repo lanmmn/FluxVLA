@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11vla_service.proto\x12\x03vla\"\x1e\n\x0c\x41\x63tionVector\x12\x0e\n\x06values\x18\x01 \x03(\x01\"\xb7\x01\n\x0cInferRequest\x12-\n\x06images\x18\x01 \x03(\x0b\x32\x1d.vla.InferRequest.ImagesEntry\x12!\n\x06\x61\x63tion\x18\x02 \x03(\x0b\x32\x11.vla.ActionVector\x12\x13\n\x0bstate_delta\x18\x03 \x01(\x05\x12\x11\n\ttimestamp\x18\x04 \x01(\x01\x1a-\n\x0bImagesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\"\x8c\x01\n\rInferResponse\x12&\n\x0b\x61\x63tion_list\x18\x01 \x03(\x0b\x32\x11.vla.ActionVector\x12*\n\x0fraw_action_list\x18\x02 \x03(\x0b\x32\x11.vla.ActionVector\x12\x12\n\ninfer_time\x18\x03 \x01(\x01\x12\x13\n\x0bsequence_id\x18\x04 \x01(\x03\"s\n\x0cServerStatus\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x10\n\x08uptime_s\x18\x02 \x01(\x01\x12\x16\n\x0etotal_requests\x18\x03 \x01(\x03\x12\x16\n\x0e\x61vg_infer_time\x18\x04 \x01(\x01\x12\x11\n\ttimestamp\x18\x05 \x01(\x01\"$\n\x0c\x43\x61meraConfig\x12\x14\n\x0c\x63\x61mera_names\x18\x01 \x03(\t\"\x15\n\x13\x43\x61meraConfigRequest\"#\n\rStatusRequest\x12\x12\n\ninterval_s\x18\x01 \x01(\x01\x32\xef\x01\n\nVLAService\x12.\n\x05Infer\x12\x11.vla.InferRequest\x1a\x12.vla.InferResponse\x12\x38\n\x0bInferStream\x12\x11.vla.InferRequest\x1a\x12.vla.InferResponse(\x01\x30\x01\x12\x37\n\x0cStatusStream\x12\x12.vla.StatusRequest\x1a\x11.vla.ServerStatus0\x01\x12>\n\x0fGetCameraConfig\x12\x18.vla.CameraConfigRequest\x1a\x11.vla.CameraConfigb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x11vla_service.proto\x12\x03vla\"\x1e\n\x0c\x41\x63tionVector\x12\x0e\n\x06values\x18\x01 \x03(\x01\"\xb7\x01\n\x0cInferRequest\x12-\n\x06images\x18\x01 \x03(\x0b\x32\x1d.vla.InferRequest.ImagesEntry\x12!\n\x06\x61\x63tion\x18\x02 \x03(\x0b\x32\x11.vla.ActionVector\x12\x13\n\x0bstate_delta\x18\x03 \x01(\x05\x12\x11\n\ttimestamp\x18\x04 \x01(\x01\x1a-\n\x0bImagesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\"\x8c\x01\n\rInferResponse\x12&\n\x0b\x61\x63tion_list\x18\x01 \x03(\x0b\x32\x11.vla.ActionVector\x12*\n\x0fraw_action_list\x18\x02 \x03(\x0b\x32\x11.vla.ActionVector\x12\x12\n\ninfer_time\x18\x03 \x01(\x01\x12\x13\n\x0bsequence_id\x18\x04 \x01(\x03\"s\n\x0cServerStatus\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x10\n\x08uptime_s\x18\x02 \x01(\x01\x12\x16\n\x0etotal_requests\x18\x03 \x01(\x03\x12\x16\n\x0e\x61vg_infer_time\x18\x04 \x01(\x01\x12\x11\n\ttimestamp\x18\x05 \x01(\x01\"$\n\x0c\x43\x61meraConfig\x12\x14\n\x0c\x63\x61mera_names\x18\x01 \x03(\t\"\x15\n\x13\x43\x61meraConfigRequest\"A\n\x17TensorBatchInferRequest\x12\x12\n\nbatch_data\x18\x01 \x01(\x0c\x12\x12\n\nunnorm_key\x18\x02 \x01(\t\"C\n\x18TensorBatchInferResponse\x12\x13\n\x0b\x61\x63tion_data\x18\x01 \x01(\x0c\x12\x12\n\ninfer_time\x18\x02 \x01(\x01\"#\n\rStatusRequest\x12\x12\n\ninterval_s\x18\x01 \x01(\x01\x32\xc0\x02\n\nVLAService\x12.\n\x05Infer\x12\x11.vla.InferRequest\x1a\x12.vla.InferResponse\x12\x38\n\x0bInferStream\x12\x11.vla.InferRequest\x1a\x12.vla.InferResponse(\x01\x30\x01\x12\x37\n\x0cStatusStream\x12\x12.vla.StatusRequest\x1a\x11.vla.ServerStatus0\x01\x12>\n\x0fGetCameraConfig\x12\x18.vla.CameraConfigRequest\x1a\x11.vla.CameraConfig\x12O\n\x10TensorBatchInfer\x12\x1c.vla.TensorBatchInferRequest\x1a\x1d.vla.TensorBatchInferResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -47,8 +47,12 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_CAMERACONFIG']._serialized_end=540
   _globals['_CAMERACONFIGREQUEST']._serialized_start=542
   _globals['_CAMERACONFIGREQUEST']._serialized_end=563
-  _globals['_STATUSREQUEST']._serialized_start=565
-  _globals['_STATUSREQUEST']._serialized_end=600
-  _globals['_VLASERVICE']._serialized_start=603
-  _globals['_VLASERVICE']._serialized_end=842
+  _globals['_TENSORBATCHINFERREQUEST']._serialized_start=565
+  _globals['_TENSORBATCHINFERREQUEST']._serialized_end=630
+  _globals['_TENSORBATCHINFERRESPONSE']._serialized_start=632
+  _globals['_TENSORBATCHINFERRESPONSE']._serialized_end=699
+  _globals['_STATUSREQUEST']._serialized_start=701
+  _globals['_STATUSREQUEST']._serialized_end=736
+  _globals['_VLASERVICE']._serialized_start=739
+  _globals['_VLASERVICE']._serialized_end=1059
 # @@protoc_insertion_point(module_scope)

@@ -63,7 +63,8 @@ class BaseInferenceRunner:
                  task_descriptions: Dict = None,
                  task_pose_sequences: Dict = None,
                  mixed_precision_dtype: str = 'float32',
-                 enable_mixed_precision: bool = True):
+                 enable_mixed_precision: bool = True,
+                 remote_inference: Dict = None):
         """Initialize the base inference runner.
 
         Args:
@@ -111,28 +112,60 @@ class BaseInferenceRunner:
         assert os.path.exists(data_stat_path), (
             f'Dataset statistics file not found at {data_stat_path}!')
 
-        # Configure dataset and denormalization
+        # Configure denormalization (always needed on client side)
         denormalize_action['norm_stats'] = data_stat_path
-        dataset['norm_stats'] = data_stat_path
-        dataset['model_path'] = os.path.dirname(os.path.dirname(ckpt_path))
-
-        # Build components
-        self.dataset = build_dataset_from_cfg(dataset)
         self.denormalize_action = build_transform_from_cfg(denormalize_action)
 
-        self.vla = build_vla_from_cfg(cfg.inference_model)
-        if ckpt_path is not None:
-            assert Path.exists(Path(ckpt_path)), \
-                f'Checkpoint path {ckpt_path} does not exist!'
-            if ckpt_path.endswith('.safetensors'):
-                state_dict = load_file(ckpt_path, device='cpu')
+        self._use_remote = (remote_inference is not None
+                            and remote_inference.get('enabled', False))
+
+        # Build dataset preprocessing (skipped for remote — server handles it)
+        if self._use_remote:
+            self.dataset = None
+        else:
+            dataset['norm_stats'] = data_stat_path
+            dataset['model_path'] = os.path.dirname(os.path.dirname(ckpt_path))
+            self.dataset = build_dataset_from_cfg(dataset)
+
+        if self._use_remote:
+            _backend = remote_inference.get('backend', 'zmq')
+            if _backend == 'zmq':
+                from fluxvla.remote import RemoteVLAZmq
+                self.vla = RemoteVLAZmq(
+                    host=remote_inference.get('host', 'localhost'),
+                    port=remote_inference.get('port', 5555),
+                    timeout_s=remote_inference.get('timeout_s', 30.0),
+                    device='cuda:0',
+                )
             else:
+                import sys
+                _grpc_dir = os.path.join(
+                    Path(__file__).resolve().parent.parent.parent.parent,
+                    'grpc')
+                if _grpc_dir not in sys.path:
+                    sys.path.insert(0, _grpc_dir)
+                from remote_vla import RemoteVLA
+                self.vla = RemoteVLA(
+                    host=remote_inference.get('host', 'localhost'),
+                    port=remote_inference.get('port', 50051),
+                    timeout_s=remote_inference.get('timeout_s', 30.0),
+                    device='cuda:0',
+                )
+            overwatch.info(
+                f'[RemoteInference] Using {_backend} VLA server at '
+                f'{remote_inference.get("host")}:'
+                f'{remote_inference.get("port")}')
+        else:
+            self.vla = build_vla_from_cfg(cfg.inference_model)
+            if ckpt_path is not None:
+                assert Path.exists(Path(ckpt_path)), \
+                    f'Checkpoint path {ckpt_path} does not exist!'
                 checkpoint = torch.load(ckpt_path, map_location='cpu')
                 if isinstance(checkpoint, dict) and 'model' in checkpoint:
                     state_dict = checkpoint['model']
                 else:
                     state_dict = checkpoint
-            self.vla.load_state_dict(state_dict, strict=True)
+                self.vla.load_state_dict(state_dict, strict=True)
 
         # Store configuration parameters
         self.seed = seed
@@ -218,13 +251,14 @@ class BaseInferenceRunner:
         """
         set_seed_everywhere(self.seed)
         self.vla.eval()
-        if self.enable_mixed_precision:
-            self.vla.to(device='cuda', dtype=self.mixed_precision_dtype)
-        else:
-            self.vla.cuda()
-        overwatch.info(f'Model loaded and moved to GPU '
-                       f'(dtype={self.mixed_precision_dtype}). '
-                       f'Seed set to {self.seed}')
+        if not self._use_remote:
+            if self.enable_mixed_precision:
+                self.vla.to(device='cuda', dtype=self.mixed_precision_dtype)
+            else:
+                self.vla.cuda()
+        overwatch.info(
+            f'Model ready (remote={self._use_remote}, '
+            f'dtype={self.mixed_precision_dtype}). Seed set to {self.seed}')
 
     def run(self,
             initial_instruction:
@@ -294,10 +328,14 @@ class BaseInferenceRunner:
             instruction (str): Task description for this chunk.
 
         Returns:
-            dict: Model-ready inputs from the dataset transform.
+            dict: Model-ready inputs (tensor batch for local, raw obs for
+                remote — server handles preprocessing).
         """
         obs = self.update_observation_window()
         obs['task_description'] = instruction
+        if self._use_remote:
+            obs['unnorm_key'] = self.task_suite_name
+            return obs
         return self.dataset(obs)
 
     def _predict_action(self, inputs: dict):

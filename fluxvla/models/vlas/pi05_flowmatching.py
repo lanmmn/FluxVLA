@@ -20,7 +20,7 @@ from torch.profiler import record_function
 
 from fluxvla.engines import VLAS
 from fluxvla.engines.utils.model_utils import (create_sinusoidal_pos_embedding,
-                                                make_att_2d_masks)
+                                               make_att_2d_masks)
 from fluxvla.engines.utils.overwatch import initialize_overwatch
 from .pi0_flowmatching import PI0FlowMatching
 
@@ -180,12 +180,20 @@ class PI05FlowMatching(PI0FlowMatching):
         M = self.mini_batches
         if M <= 1:
             return super().forward(
-                images=images, lang_tokens=lang_tokens, states=states,
-                actions=actions, action_masks=action_masks,
-                img_masks=img_masks, lang_masks=lang_masks,
-                past_key_values=past_key_values, use_cache=use_cache,
-                fill_kv_cache=fill_kv_cache, noise=noise, time=time,
-                *args, **kwarg)
+                images=images,
+                lang_tokens=lang_tokens,
+                states=states,
+                actions=actions,
+                action_masks=action_masks,
+                img_masks=img_masks,
+                lang_masks=lang_masks,
+                past_key_values=past_key_values,
+                use_cache=use_cache,
+                fill_kv_cache=fill_kv_cache,
+                noise=noise,
+                time=time,
+                *args,
+                **kwarg)
 
         B = actions.shape[0]
         B_M = B * M
@@ -195,8 +203,10 @@ class PI05FlowMatching(PI0FlowMatching):
         # embed_prefix runs SigLIP + LLM embed on B images (expensive).
         with record_function("embed_prefix"):
             prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
-                images=images, lang_tokens=lang_tokens,
-                img_masks=img_masks, lang_masks=lang_masks)
+                images=images,
+                lang_tokens=lang_tokens,
+                img_masks=img_masks,
+                lang_masks=lang_masks)
 
         # === Phase B: Replicate prefix embeddings (B -> B*M) ===
         # Cheap memory copy — avoids re-running SigLIP M times.
@@ -213,8 +223,9 @@ class PI05FlowMatching(PI0FlowMatching):
             noise = self.sample_noise(actions_expanded.shape, device)
             time = self.sample_time(B_M, device)
 
-            x_t = (time[:, None, None] * noise
-                   + (1 - time[:, None, None]) * actions_expanded)
+            x_t = (
+                time[:, None, None] * noise +
+                (1 - time[:, None, None]) * actions_expanded)
             u_t = noise - actions_expanded
 
             suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = (
@@ -253,7 +264,8 @@ class PI05FlowMatching(PI0FlowMatching):
                 u_t = u_t[:, :, :self.ori_action_dim]
 
             if action_masks is not None:
-                action_masks_expanded = action_masks.repeat_interleave(M, dim=0)
+                action_masks_expanded = action_masks.repeat_interleave(
+                    M, dim=0)
                 losses = F.mse_loss(u_t, v_t, reduction='none')
                 losses = losses * action_masks_expanded.unsqueeze(-1)
                 loss = losses.sum() / (

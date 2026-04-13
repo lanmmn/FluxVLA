@@ -79,7 +79,8 @@ class LiberoEvalRunner:
                  num_trials_per_task: int = 50,
                  num_steps_wait: int = 10,
                  mixed_precision_dtype: str = 'bf16',
-                 enable_mixed_precision_training: bool = True):
+                 enable_mixed_precision_training: bool = True,
+                 remote_inference: Dict = None):
         from fluxvla.engines import (build_dataset_from_cfg,
                                      build_transform_from_cfg,
                                      build_vla_from_cfg)
@@ -110,12 +111,16 @@ class LiberoEvalRunner:
             'dataset_statistics.json')  # noqa: E501
         assert os.path.exists(data_stat_path), \
             f'Dataset statistics file not found at {data_stat_path}!'
-        # Load dataset and denormalization action
+        # Load denormalization (always needed on client side)
         denormalize_action['norm_stats'] = data_stat_path
-        dataset['task_suite_name'] = task_suite_name
-        dataset['norm_stats'] = data_stat_path
-        self.dataset = build_dataset_from_cfg(dataset)
         self.denormalize_action = build_transform_from_cfg(denormalize_action)
+        # Build dataset preprocessing (skipped for remote — server handles it)
+        if self._use_remote:
+            self.dataset = None
+        else:
+            dataset['task_suite_name'] = task_suite_name
+            dataset['norm_stats'] = data_stat_path
+            self.dataset = build_dataset_from_cfg(dataset)
         self.eval_chunk_size = eval_chunk_size
         self.model_family = model_family
         self.task_suite_name = task_suite_name
@@ -146,7 +151,8 @@ class LiberoEvalRunner:
         self.vla.freeze_llm_backbone = True
         self.vla.freeze_projector = True
         self.vla.freeze_vlm_backbone = True
-        self.vla.cuda(self.device_id)
+        if not self._use_remote:
+            self.vla.cuda(self.device_id)
 
     def run(self):
         """Run the evaluation process."""
@@ -190,6 +196,18 @@ class LiberoEvalRunner:
             if unnorm_key not in self.vla.norm_stats and f'{unnorm_key}_no_noops' in self.vla.norm_stats:  # noqa: E501
                 unnorm_key = f'{unnorm_key}_no_noops'
             assert unnorm_key in self.vla.norm_stats, f'Action un-norm key {unnorm_key} not found in VLA `norm_stats`!'  # noqa: E501
+
+        # ---- Profiling: global accumulators ----
+        _prof_keys = ['data_preprocess', 'model_inference',
+                      'action_postprocess', 'denormalize', 'env_step']
+        # Remote inference sub-phase keys
+        _remote_keys = ['serialize', 'network', 'server_infer', 'deserialize']
+        _prof_global = {k: 0.0 for k in _prof_keys}
+        _prof_global['total'] = 0.0
+        for rk in _remote_keys:
+            _prof_global[rk] = 0.0
+        _prof_global_steps = 0
+
         for id in range(num_local_episodes):
             if id >= len(local_episodes):
                 step_tensor = torch.zeros(
@@ -239,8 +257,15 @@ class LiberoEvalRunner:
                     max_steps = 400  # longest training demo has 373 steps
 
                 overwatch.info(f'Starting episode {trial_id+1}...')
-
                 log_file.write(f'Starting episode {trial_id+1}...\n')
+
+                # ---- Profiling: per-episode accumulators ----
+                _prof_ep = {k: 0.0 for k in _prof_keys}
+                _prof_ep['total'] = 0.0
+                for rk in _remote_keys:
+                    _prof_ep[rk] = 0.0
+                _prof_ep_steps = 0
+
                 while t < max_steps + self.num_steps_wait:
                     # IMPORTANT: Do nothing for the first
                     # few timesteps
@@ -251,17 +276,52 @@ class LiberoEvalRunner:
                             get_libero_dummy_action())
                         t += 1
                         continue
+                    _t_step_start = time.perf_counter()
+
+                    # Phase 1: data preprocessing
+                    _t0 = time.perf_counter()
                     obs['task_description'] = task_description
-                    batch, replay_img = self.dataset(obs)
-                    batch['unnorm_key'] = unnorm_key
-                    if len(replay_images) == 0:
-                        replay_images.append(replay_img)
+                    if self._use_remote:
+                        # Remote: send raw obs, server does preprocessing
+                        obs['unnorm_key'] = unnorm_key
+                        batch = obs
+                        if len(replay_images) == 0:
+                            _first_img = next(
+                                (v for v in obs.values()
+                                 if hasattr(v, 'shape') and len(
+                                     getattr(v, 'shape', ())) == 3),
+                                None)
+                            if _first_img is not None:
+                                replay_images.append(_first_img)
+                    else:
+                        batch, replay_img = self.dataset(obs)
+                        batch['unnorm_key'] = unnorm_key
+                        if len(replay_images) == 0:
+                            replay_images.append(replay_img)
+                    _prof_ep['data_preprocess'] += time.perf_counter() - _t0
+
+                    # Phase 2: model inference
+                    _t0 = time.perf_counter()
                     with torch.autocast(
                             'cuda',
                             dtype=self.mixed_precision_dtype,
                             enabled=self.enable_mixed_precision_training):
                         with torch.no_grad():
                             actions = self.vla.predict_action(**batch)
+                    _prof_ep['model_inference'] += time.perf_counter() - _t0
+
+                    # Collect remote inference sub-phases
+                    if self._use_remote and hasattr(self.vla, '_last_profile'):
+                        _lp = self.vla._last_profile
+                        _prof_ep['serialize'] += _lp.get('serialize_ms', 0.0)
+                        _prof_ep['network'] += _lp.get('network_ms', 0.0)
+                        _prof_ep['server_infer'] += _lp.get(
+                            'server_infer_ms', 0.0)
+                        _prof_ep['deserialize'] += _lp.get(
+                            'deserialize_ms', 0.0)
+
+                    # Phase 3: action postprocess
+                    _t0 = time.perf_counter()
                     if len(actions.shape) == 3:
                         actions = actions[
                             0, :self.eval_chunk_size, :].cpu().numpy()
@@ -269,23 +329,74 @@ class LiberoEvalRunner:
                         assert len(actions.shape) == 2, \
                             f'Unexpected action shape: {actions.shape}'
                         actions = actions[0, None, :].cpu().numpy()
+                    _prof_ep['action_postprocess'] += time.perf_counter() - _t0
+
                     for action in actions:
+                        # Phase 4: denormalize
+                        _t0 = time.perf_counter()
                         inputs = dict(
                             action=action,
                             task_suite_name=self.task_suite_name,
                         )
                         action_denormed = self.denormalize_action(inputs)
+                        _prof_ep['denormalize'] += time.perf_counter() - _t0
+
+                        # Phase 5: env step
+                        _t0 = time.perf_counter()
                         obs, reward, done, info = env.step(
                             action_denormed.tolist())
-                        obs['task_description'] = task_description
-                        batch, replay_img = self.dataset(obs)
-                        replay_images.append(replay_img)
+                        if self._use_remote:
+                            _first_img = next(
+                                (v for v in obs.values()
+                                 if hasattr(v, 'shape') and len(
+                                     getattr(v, 'shape', ())) == 3),
+                                None)
+                            if _first_img is not None:
+                                replay_images.append(_first_img)
+                        else:
+                            obs['task_description'] = task_description
+                            batch, replay_img = self.dataset(obs)
+                            replay_images.append(replay_img)
+                        _prof_ep['env_step'] += time.perf_counter() - _t0
+
                         if done:
                             total_successes += 1
                             break
                         t += 1
+
+                    _prof_ep['total'] += time.perf_counter() - _t_step_start
+                    _prof_ep_steps += 1
+
                     if done:
                         break
+                # ---- Profiling: episode summary ----
+                if _prof_ep_steps > 0:
+                    n = _prof_ep_steps
+                    _msg = (f'[Profiling] Task {task_id} Trial {trial_id} '
+                            f'({n} steps):')
+                    for k in _prof_keys:
+                        _msg += f'  {k}={_prof_ep[k]/n*1000:.1f}ms'
+                    _msg += f'  total={_prof_ep["total"]/n*1000:.1f}ms'
+                    if self._use_remote:
+                        _msg += (
+                            f'\n  [Remote detail] '
+                            f'serialize={_prof_ep["serialize"]/n:.1f}ms  '
+                            f'network={_prof_ep["network"]/n:.1f}ms  '
+                            f'server_infer='
+                            f'{_prof_ep["server_infer"]/n:.1f}ms  '
+                            f'deserialize='
+                            f'{_prof_ep["deserialize"]/n:.1f}ms')
+                    overwatch.info(_msg)
+                    log_file.write(_msg + '\n')
+                    # Accumulate to global
+                    for k in _prof_keys:
+                        _prof_global[k] += _prof_ep[k]
+                    _prof_global['total'] += _prof_ep['total']
+                    if self._use_remote:
+                        for rk in _remote_keys:
+                            _prof_global[rk] += _prof_ep[rk]
+                    _prof_global_steps += _prof_ep_steps
+
                 total_episodes += 1
                 step_tensor = torch.ones(1, device=torch.cuda.current_device())
                 # Save a replay video of the episode
@@ -326,5 +437,26 @@ class LiberoEvalRunner:
                     f'# successes: {global_successes[0]} ({global_successes[0] / global_episodes[0] * 100:.1f}%)\n'  # noqa: E501
                 )
                 log_file.flush()
+
+        # ---- Profiling: global summary ----
+        if _prof_global_steps > 0 and rank == 0:
+            n = _prof_global_steps
+            _msg = f'[Profiling Global] {n} total steps avg per step:'
+            for k in _prof_keys:
+                _msg += f'  {k}={_prof_global[k]/n*1000:.1f}ms'
+            _msg += f'  total={_prof_global["total"]/n*1000:.1f}ms'
+            if self._use_remote:
+                _msg += (
+                    f'\n  [Remote detail] '
+                    f'serialize={_prof_global["serialize"]/n:.1f}ms  '
+                    f'network={_prof_global["network"]/n:.1f}ms  '
+                    f'server_infer='
+                    f'{_prof_global["server_infer"]/n:.1f}ms  '
+                    f'deserialize='
+                    f'{_prof_global["deserialize"]/n:.1f}ms')
+            overwatch.info(_msg)
+            log_file.write(_msg + '\n')
+            log_file.flush()
+
         dist.barrier()
         exit(0)

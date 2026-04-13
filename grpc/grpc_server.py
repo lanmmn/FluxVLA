@@ -1,15 +1,18 @@
 """gRPC server for VLA inference service."""
 from __future__ import annotations
-
-import time
+import io
 import threading
+import time
 from concurrent import futures
 
-import grpc
 import numpy as np
-
+import torch
 import vla_service_pb2
 import vla_service_pb2_grpc
+
+import grpc
+
+_MAX_MSG_BYTES = 64 * 1024 * 1024  # 64 MB
 
 
 class MockInferPipeline:
@@ -22,7 +25,8 @@ class MockInferPipeline:
     def infer(self, images: dict[str, bytes], action: list[list[float]],
               state_delta: int, timestamp: float) -> dict:
         time.sleep(0.01)  # simulate inference latency
-        raw_actions = np.random.randn(self._action_horizon, self._action_dim) * 0.1
+        raw_actions = np.random.randn(self._action_horizon,
+                                      self._action_dim) * 0.1
         optimized_actions = raw_actions * 0.95  # mock optimization
         return {
             "action_list": optimized_actions.tolist(),
@@ -30,12 +34,39 @@ class MockInferPipeline:
         }
 
 
+class VLAInferPipeline:
+    """Wraps a real VLA model for server-side tensor-batch inference."""
+
+    def __init__(self, vla_model, device: str = "cuda:0",
+                 mixed_precision_dtype=torch.bfloat16):
+        self._vla = vla_model
+        self._device = torch.device(device)
+        self._dtype = mixed_precision_dtype
+        self._vla.eval()
+        self._vla.to(self._device)
+
+    @torch.no_grad()
+    def predict_action(self, **batch):
+        # Move all tensors to the model device
+        for k, v in batch.items():
+            if isinstance(v, torch.Tensor):
+                batch[k] = v.to(self._device)
+
+        with torch.autocast("cuda", dtype=self._dtype, enabled=True):
+            actions = self._vla.predict_action(**batch)
+        return actions
+
+
 class VLAServiceServicer(vla_service_pb2_grpc.VLAServiceServicer):
     """Implements the VLAService gRPC interface."""
 
-    def __init__(self, pipeline=None, camera_names: list[str] | None = None):
+    def __init__(self, pipeline=None, camera_names: list[str] | None = None,
+                 vla_pipeline: VLAInferPipeline | None = None):
         self._pipeline = pipeline or MockInferPipeline()
-        self._camera_names = camera_names or ["high", "left_hand", "right_hand"]
+        self._vla_pipeline = vla_pipeline
+        self._camera_names = camera_names or [
+            "high", "left_hand", "right_hand"
+        ]
         self._start_time = time.time()
         self._total_requests = 0
         self._total_infer_time = 0.0
@@ -62,7 +93,9 @@ class VLAServiceServicer(vla_service_pb2_grpc.VLAServiceServicer):
         action = [[v for v in av.values] for av in request.action]
         return images, action, request.state_delta, request.timestamp
 
-    def _build_response(self, result: dict, sequence_id: int = 0) -> vla_service_pb2.InferResponse:
+    def _build_response(self,
+                        result: dict,
+                        sequence_id: int = 0) -> vla_service_pb2.InferResponse:
         response = vla_service_pb2.InferResponse()
         for action in result["action_list"]:
             av = vla_service_pb2.ActionVector()
@@ -79,6 +112,56 @@ class VLAServiceServicer(vla_service_pb2_grpc.VLAServiceServicer):
     def GetCameraConfig(self, request, context):
         """Return the server's expected camera configuration."""
         return vla_service_pb2.CameraConfig(camera_names=self._camera_names)
+
+    def TensorBatchInfer(self, request, context):
+        """Tensor-batch inference: receive serialized batch, return actions."""
+        if self._vla_pipeline is None:
+            context.abort(
+                grpc.StatusCode.UNIMPLEMENTED,
+                "TensorBatchInfer requires a VLAInferPipeline; "
+                "start the server with --config and --ckpt-path.")
+            return vla_service_pb2.TensorBatchInferResponse()
+
+        t0 = time.perf_counter()
+        try:
+            batch = torch.load(io.BytesIO(request.batch_data),
+                               map_location="cpu", weights_only=True)
+        except Exception as e:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT,
+                          f"Failed to deserialize batch: {e}")
+            return vla_service_pb2.TensorBatchInferResponse()
+        t_deserialize = time.perf_counter() - t0
+
+        if request.unnorm_key:
+            batch["unnorm_key"] = request.unnorm_key
+
+        t1 = time.perf_counter()
+        actions = self._vla_pipeline.predict_action(**batch)
+        infer_time = time.perf_counter() - t1
+
+        t2 = time.perf_counter()
+        buf = io.BytesIO()
+        torch.save(actions.cpu(), buf)
+        t_serialize = time.perf_counter() - t2
+
+        with self._lock:
+            self._total_requests += 1
+            self._total_infer_time += infer_time
+
+            if self._total_requests % 50 == 0:
+                n = self._total_requests
+                avg = self._total_infer_time / n
+                print(f"[TensorBatchInfer] req={n}  "
+                      f"deserialize={t_deserialize*1000:.1f}ms  "
+                      f"infer={infer_time*1000:.1f}ms  "
+                      f"serialize={t_serialize*1000:.1f}ms  "
+                      f"avg_infer={avg*1000:.1f}ms",
+                      flush=True)
+
+        return vla_service_pb2.TensorBatchInferResponse(
+            action_data=buf.getvalue(),
+            infer_time=infer_time,
+        )
 
     def Infer(self, request, context):
         """Unary RPC: single request-response."""
@@ -101,11 +184,13 @@ class VLAServiceServicer(vla_service_pb2_grpc.VLAServiceServicer):
         seq_id = 0
         for request in request_iterator:
             if context.is_active():
-                images, action, state_delta, timestamp = self._parse_request(request)
+                images, action, state_delta, timestamp = self._parse_request(
+                    request)
                 self._validate_cameras(list(images.keys()), context)
 
                 start = time.time()
-                result = self._pipeline.infer(images, action, state_delta, timestamp)
+                result = self._pipeline.infer(images, action, state_delta,
+                                              timestamp)
                 infer_time = time.time() - start
                 result["infer_time"] = infer_time
 
@@ -118,7 +203,8 @@ class VLAServiceServicer(vla_service_pb2_grpc.VLAServiceServicer):
 
     def StatusStream(self, request, context):
         """Server streaming: push periodic status updates."""
-        interval = max(0.1, request.interval_s) if request.interval_s > 0 else 1.0
+        interval = max(0.1,
+                       request.interval_s) if request.interval_s > 0 else 1.0
 
         while context.is_active():
             with self._lock:
@@ -136,11 +222,22 @@ class VLAServiceServicer(vla_service_pb2_grpc.VLAServiceServicer):
             time.sleep(interval)
 
 
-def serve(host: str = "0.0.0.0", port: int = 50051, max_workers: int = 4,
-          pipeline=None, camera_names: list[str] | None = None) -> grpc.Server:
+def serve(host: str = "0.0.0.0",
+          port: int = 50051,
+          max_workers: int = 4,
+          pipeline=None,
+          camera_names: list[str] | None = None,
+          vla_pipeline: VLAInferPipeline | None = None) -> grpc.Server:
     """Create and start a gRPC server. Returns the server instance."""
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers))
-    servicer = VLAServiceServicer(pipeline=pipeline, camera_names=camera_names)
+    opts = [
+        ("grpc.max_send_message_length", _MAX_MSG_BYTES),
+        ("grpc.max_receive_message_length", _MAX_MSG_BYTES),
+    ]
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers),
+                         options=opts)
+    servicer = VLAServiceServicer(pipeline=pipeline,
+                                  camera_names=camera_names,
+                                  vla_pipeline=vla_pipeline)
     vla_service_pb2_grpc.add_VLAServiceServicer_to_server(servicer, server)
     server.add_insecure_port(f"{host}:{port}")
     server.start()
@@ -154,12 +251,18 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=50051)
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--cameras", nargs="+", default=None,
-                        help="expected camera names, e.g. --cameras high left_hand right_hand")
+    parser.add_argument(
+        "--cameras",
+        nargs="+",
+        default=None,
+        help="expected camera names, e.g. --cameras high left_hand right_hand")
     args = parser.parse_args()
 
-    server = serve(host=args.host, port=args.port, max_workers=args.workers,
-                   camera_names=args.cameras)
+    server = serve(
+        host=args.host,
+        port=args.port,
+        max_workers=args.workers,
+        camera_names=args.cameras)
     try:
         server.wait_for_termination()
     except KeyboardInterrupt:

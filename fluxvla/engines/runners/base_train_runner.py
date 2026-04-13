@@ -194,8 +194,8 @@ class BaseTrainRunner(ABC):
         if self._profiler_active_steps <= 0 or not overwatch.is_rank_zero():
             return
 
-        from torch.profiler import (ProfilerActivity, profile, schedule)
         import wandb
+        from torch.profiler import ProfilerActivity, profile, schedule
 
         prof_dir = os.path.join(self.metric.run_dir, 'profiler')
         os.makedirs(prof_dir, exist_ok=True)
@@ -208,19 +208,23 @@ class BaseTrainRunner(ABC):
 
             if wandb.run is not None:
                 key_avgs = p.key_averages()
-                table_data = sorted(
-                    [[e.key,
-                      round(e.cpu_time_total / 1000, 2),
-                      round(e.cuda_time_total / 1000, 2),
-                      e.count,
-                      round(e.cuda_memory_usage / 1024**2, 2)]
-                     for e in key_avgs if e.cuda_time_total > 0],
-                    key=lambda x: -x[2])
+                table_data = sorted([[
+                    e.key,
+                    round(e.cpu_time_total / 1000, 2),
+                    round(e.cuda_time_total / 1000, 2), e.count,
+                    round(e.cuda_memory_usage / 1024**2, 2)
+                ] for e in key_avgs if e.cuda_time_total > 0],
+                                    key=lambda x: -x[2])
                 wandb.log(
-                    {'profiler/key_averages': wandb.Table(
-                        columns=['op', 'cpu_ms', 'cuda_ms', 'count',
-                                 'cuda_mem_mb'],
-                        data=table_data[:30])},
+                    {
+                        'profiler/key_averages':
+                        wandb.Table(
+                            columns=[
+                                'op', 'cpu_ms', 'cuda_ms', 'count',
+                                'cuda_mem_mb'
+                            ],
+                            data=table_data[:30])
+                    },
                     step=step)
 
         active = self._profiler_active_steps

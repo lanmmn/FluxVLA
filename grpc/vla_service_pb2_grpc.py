@@ -55,6 +55,11 @@ class VLAServiceStub(object):
                 request_serializer=vla__service__pb2.CameraConfigRequest.SerializeToString,
                 response_deserializer=vla__service__pb2.CameraConfig.FromString,
                 _registered_method=True)
+        self.TensorBatchInfer = channel.unary_unary(
+                '/vla.VLAService/TensorBatchInfer',
+                request_serializer=vla__service__pb2.TensorBatchInferRequest.SerializeToString,
+                response_deserializer=vla__service__pb2.TensorBatchInferResponse.FromString,
+                _registered_method=True)
 
 
 class VLAServiceServicer(object):
@@ -89,6 +94,13 @@ class VLAServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def TensorBatchInfer(self, request, context):
+        """Unary RPC: tensor-batch inference for preprocessed model inputs
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_VLAServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -111,6 +123,11 @@ def add_VLAServiceServicer_to_server(servicer, server):
                     servicer.GetCameraConfig,
                     request_deserializer=vla__service__pb2.CameraConfigRequest.FromString,
                     response_serializer=vla__service__pb2.CameraConfig.SerializeToString,
+            ),
+            'TensorBatchInfer': grpc.unary_unary_rpc_method_handler(
+                    servicer.TensorBatchInfer,
+                    request_deserializer=vla__service__pb2.TensorBatchInferRequest.FromString,
+                    response_serializer=vla__service__pb2.TensorBatchInferResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -222,6 +239,33 @@ class VLAService(object):
             '/vla.VLAService/GetCameraConfig',
             vla__service__pb2.CameraConfigRequest.SerializeToString,
             vla__service__pb2.CameraConfig.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def TensorBatchInfer(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/vla.VLAService/TensorBatchInfer',
+            vla__service__pb2.TensorBatchInferRequest.SerializeToString,
+            vla__service__pb2.TensorBatchInferResponse.FromString,
             options,
             channel_credentials,
             insecure,

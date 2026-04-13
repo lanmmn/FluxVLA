@@ -521,7 +521,7 @@ class PI0FlowMatching(BaseVLA):
                 attention_mask=attention_masks,
                 position_ids=position_ids,
                 past_key_values=past_key_values,
-                use_cache=use_cache, 
+                use_cache=use_cache,
                 adarms_cond=adarms_cond[1]
                 if adarms_cond is not None else None,
             )
@@ -584,7 +584,7 @@ class PI0FlowMatching(BaseVLA):
                 flow matching.
         """
         from torch.profiler import record_function
-        
+
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
 
@@ -623,7 +623,7 @@ class PI0FlowMatching(BaseVLA):
                 img_masks=img_masks,
                 lang_masks=lang_masks,
                 past_key_values=past_key_values)
-        with record_function("embed_suffix"):   
+        with record_function("embed_suffix"):
             suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = (
                 self.embed_suffix(states, x_t, t))
         inputs_embeds = [prefix_embs, suffix_embs]
