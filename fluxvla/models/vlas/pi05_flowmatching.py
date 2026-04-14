@@ -157,4 +157,3 @@ class PI05FlowMatching(PI0FlowMatching):
         att_masks = att_masks[None, :].expand(bsize, len(att_masks))
 
         return embs, pad_masks, att_masks, time_emb
-

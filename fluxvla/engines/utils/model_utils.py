@@ -157,6 +157,77 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
                                  head_dim)
 
 
+def create_pi05_block_mask(att_masks, pad_masks, device):
+    """Build a FlexAttention BlockMask from Pi0.5's 1D masks.
+
+    Args:
+        att_masks: (B, L) bool tensor — segment boundary indicators.
+        pad_masks: (B, L) bool tensor — padding masks.
+        device: CUDA device.
+
+    Returns:
+        BlockMask object for use with flex_attention.
+    """
+    from torch.nn.attention.flex_attention import create_block_mask
+
+    B, L = att_masks.shape
+    segment_ids = torch.cumsum(att_masks.int(), dim=1)  # (B, L)
+
+    def mask_mod(b, h, q_idx, kv_idx):
+        q_seg = segment_ids[b, q_idx]
+        kv_seg = segment_ids[b, kv_idx]
+        segment_ok = q_seg >= kv_seg
+        pad_ok = pad_masks[b, q_idx] & pad_masks[b, kv_idx]
+        return segment_ok & pad_ok
+
+    return create_block_mask(
+        mask_mod,
+        B=B,
+        H=None,
+        Q_LEN=L,
+        KV_LEN=L,
+        device=device,
+    )
+
+
+_flex_attention_compiled = None
+
+
+def flex_attention_forward(
+    module: nn.Module,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attention_mask,
+    scaling: float,
+    dropout: float = 0.0,
+    **kwargs,
+):
+    """FlexAttention forward with compiled kernel and GQA support.
+
+    Args:
+        module: Attention module (used for interface compatibility).
+        query: (B, Hq, L, D) query states.
+        key: (B, Hkv, L, D) key states.
+        value: (B, Hkv, L, D) value states.
+        attention_mask: BlockMask object from create_pi05_block_mask.
+        scaling: Attention scaling factor.
+    """
+    global _flex_attention_compiled
+    if _flex_attention_compiled is None:
+        from torch.nn.attention.flex_attention import flex_attention
+        _flex_attention_compiled = torch.compile(flex_attention)
+
+    attn_output = _flex_attention_compiled(
+        query, key, value,
+        block_mask=attention_mask,
+        scale=scaling,
+        enable_gqa=True,
+    )
+    attn_output = attn_output.transpose(1, 2).contiguous()
+    return attn_output, None
+
+
 def eager_attention_forward(
     module: nn.Module,
     query: torch.Tensor,

@@ -83,9 +83,11 @@ def main():
         print(f"[serve_vla_zmq] Loaded norm_stats from {data_stat_path}")
 
     # --- Build dataset preprocessing pipeline (server-side) ---
-    from fluxvla.engines import build_dataset_from_cfg
+    from fluxvla.engines import build_dataset_from_cfg, build_transform_from_cfg
 
     dataset = None
+    denormalize_action = None
+    task_suite_name = ""
     dataset_key = args.dataset_key
     if dataset_key is None:
         # Auto-detect: prefer inference, fallback to eval
@@ -99,12 +101,31 @@ def main():
         # Inject norm_stats path so transforms can normalize states
         if "norm_stats" not in dataset_cfg:
             dataset_cfg["norm_stats"] = data_stat_path
-        if "model_path" not in dataset_cfg:
+        # Inject model_path only for datasets that need it
+        # (e.g. PrivateInferenceDataset); Libero datasets don't accept it
+        ds_type = dataset_cfg.get("type", "")
+        if "model_path" not in dataset_cfg and "Libero" not in ds_type:
             dataset_cfg["model_path"] = os.path.dirname(
                 os.path.dirname(ckpt_path))
+        # Inject task_suite_name for Libero datasets if not present
+        if "task_suite_name" not in dataset_cfg and "Libero" in ds_type:
+            eval_cfg = getattr(cfg, dataset_key, None)
+            if eval_cfg and hasattr(eval_cfg, "task_suite_name"):
+                dataset_cfg["task_suite_name"] = eval_cfg.task_suite_name
         dataset = build_dataset_from_cfg(dataset_cfg)
         print(f"[serve_vla_zmq] Dataset pipeline built from "
               f"cfg.{dataset_key}.dataset")
+
+        # Build denormalize_action transform (server-side denormalization)
+        eval_cfg = getattr(cfg, dataset_key, None)
+        if eval_cfg and hasattr(eval_cfg, 'denormalize_action'):
+            denorm_cfg = dict(eval_cfg.denormalize_action)
+            denorm_cfg['norm_stats'] = data_stat_path
+            denormalize_action = build_transform_from_cfg(denorm_cfg)
+            print(f"[serve_vla_zmq] Denormalize action transform built "
+                  f"from cfg.{dataset_key}.denormalize_action")
+        if eval_cfg and hasattr(eval_cfg, 'task_suite_name'):
+            task_suite_name = eval_cfg.task_suite_name
     else:
         print("[serve_vla_zmq] WARNING: No dataset pipeline found in config. "
               "Server expects pre-processed tensor batches from client.")
@@ -127,6 +148,8 @@ def main():
         host=args.host,
         port=args.port,
         dataset=dataset,
+        denormalize_action=denormalize_action,
+        task_suite_name=task_suite_name,
     )
     print(f"[serve_vla_zmq] ZMQ server starting on "
           f"tcp://{args.host}:{args.port}")

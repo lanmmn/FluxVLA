@@ -64,7 +64,7 @@ class BaseInferenceRunner:
                  task_pose_sequences: Dict = None,
                  mixed_precision_dtype: str = 'float32',
                  enable_mixed_precision: bool = True,
-                 remote_inference: Dict = None):
+                 offload_inference: Dict = None):
         """Initialize the base inference runner.
 
         Args:
@@ -105,36 +105,37 @@ class BaseInferenceRunner:
                                      build_transform_from_cfg,
                                      build_vla_from_cfg)
 
-        # Initialize paths and validate dataset statistics
+        # Initialize paths
         self.ckpt_path = ckpt_path
-        data_stat_path = os.path.join(
-            Path(ckpt_path).resolve().parent.parent, 'dataset_statistics.json')
-        assert os.path.exists(data_stat_path), (
-            f'Dataset statistics file not found at {data_stat_path}!')
+        self._use_offload = (offload_inference is not None
+                            and offload_inference.get('enabled', False))
 
-        # Configure denormalization (always needed on client side)
-        denormalize_action['norm_stats'] = data_stat_path
-        self.denormalize_action = build_transform_from_cfg(denormalize_action)
-
-        self._use_remote = (remote_inference is not None
-                            and remote_inference.get('enabled', False))
-
-        # Build dataset preprocessing (skipped for remote — server handles it)
-        if self._use_remote:
+        if self._use_offload:
+            # Remote mode: server handles denormalization and preprocessing
             self.dataset = None
+            self.denormalize_action = None
         else:
+            data_stat_path = os.path.join(
+                Path(ckpt_path).resolve().parent.parent,
+                'dataset_statistics.json')
+            assert os.path.exists(data_stat_path), (
+                f'Dataset statistics file not found at {data_stat_path}!')
+            denormalize_action['norm_stats'] = data_stat_path
+            self.denormalize_action = build_transform_from_cfg(
+                denormalize_action)
             dataset['norm_stats'] = data_stat_path
-            dataset['model_path'] = os.path.dirname(os.path.dirname(ckpt_path))
+            dataset['model_path'] = os.path.dirname(
+                os.path.dirname(ckpt_path))
             self.dataset = build_dataset_from_cfg(dataset)
 
-        if self._use_remote:
-            _backend = remote_inference.get('backend', 'zmq')
+        if self._use_offload:
+            _backend = offload_inference.get('backend', 'zmq')
             if _backend == 'zmq':
                 from fluxvla.remote import RemoteVLAZmq
                 self.vla = RemoteVLAZmq(
-                    host=remote_inference.get('host', 'localhost'),
-                    port=remote_inference.get('port', 5555),
-                    timeout_s=remote_inference.get('timeout_s', 30.0),
+                    host=offload_inference.get('host', 'localhost'),
+                    port=offload_inference.get('port', 5555),
+                    timeout_s=offload_inference.get('timeout_s', 30.0),
                     device='cuda:0',
                 )
             else:
@@ -146,15 +147,15 @@ class BaseInferenceRunner:
                     sys.path.insert(0, _grpc_dir)
                 from remote_vla import RemoteVLA
                 self.vla = RemoteVLA(
-                    host=remote_inference.get('host', 'localhost'),
-                    port=remote_inference.get('port', 50051),
-                    timeout_s=remote_inference.get('timeout_s', 30.0),
+                    host=offload_inference.get('host', 'localhost'),
+                    port=offload_inference.get('port', 50051),
+                    timeout_s=offload_inference.get('timeout_s', 30.0),
                     device='cuda:0',
                 )
             overwatch.info(
-                f'[RemoteInference] Using {_backend} VLA server at '
-                f'{remote_inference.get("host")}:'
-                f'{remote_inference.get("port")}')
+                f'[OffloadInference] Using {_backend} VLA server at '
+                f'{offload_inference.get("host")}:'
+                f'{offload_inference.get("port")}')
         else:
             self.vla = build_vla_from_cfg(cfg.inference_model)
             if ckpt_path is not None:
@@ -251,13 +252,13 @@ class BaseInferenceRunner:
         """
         set_seed_everywhere(self.seed)
         self.vla.eval()
-        if not self._use_remote:
+        if not self._use_offload:
             if self.enable_mixed_precision:
                 self.vla.to(device='cuda', dtype=self.mixed_precision_dtype)
             else:
                 self.vla.cuda()
         overwatch.info(
-            f'Model ready (remote={self._use_remote}, '
+            f'Model ready (offload={self._use_offload}, '
             f'dtype={self.mixed_precision_dtype}). Seed set to {self.seed}')
 
     def run(self,
@@ -333,7 +334,7 @@ class BaseInferenceRunner:
         """
         obs = self.update_observation_window()
         obs['task_description'] = instruction
-        if self._use_remote:
+        if self._use_offload:
             obs['unnorm_key'] = self.task_suite_name
             return obs
         return self.dataset(obs)
@@ -362,6 +363,9 @@ class BaseInferenceRunner:
         Returns:
             np.ndarray: Denormalized actions, truncated to action_chunk.
         """
+        if self._use_offload:
+            # Server already denormalized
+            return raw_action.cpu().numpy()[:self.action_chunk]
         denormalized = self.denormalize_action(
             dict(action=raw_action.cpu().numpy()))
         return denormalized[:self.action_chunk]

@@ -172,7 +172,7 @@ class DenormalizeLiberoAction:
             action = invert_gripper_action(action)
 
         if self.action_dim is not None:
-            action = action[:self.action_dim]
+            action = action[..., :self.action_dim]
         return action
 
     def _denormalize(self, normalized_action: np.ndarray, stats: Dict):

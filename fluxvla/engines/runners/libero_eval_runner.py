@@ -80,15 +80,13 @@ class LiberoEvalRunner:
                  num_steps_wait: int = 10,
                  mixed_precision_dtype: str = 'bf16',
                  enable_mixed_precision_training: bool = True,
-                 remote_inference: Dict = None):
+                 offload_inference: Dict = None):
         from fluxvla.engines import (build_dataset_from_cfg,
                                      build_transform_from_cfg,
                                      build_vla_from_cfg)
         self.device_id = overwatch.local_rank()
-        if hasattr(cfg, 'inference_model'):
-            self.vla = build_vla_from_cfg(cfg.inference_model).eval()
-        else:
-            self.vla = build_vla_from_cfg(cfg.model).eval()
+
+        self.vla = build_vla_from_cfg(cfg.model).eval()
         # Load checkpoint weights if ckpt_path is provided
         if ckpt_path is not None:
             assert Path.exists(Path(ckpt_path)), \
@@ -106,21 +104,35 @@ class LiberoEvalRunner:
         self.cfg = cfg
         self.seed = seed
         self.ckpt_path = ckpt_path
-        data_stat_path = os.path.join(
-            Path(self.ckpt_path).resolve().parent.parent,
-            'dataset_statistics.json')  # noqa: E501
-        assert os.path.exists(data_stat_path), \
-            f'Dataset statistics file not found at {data_stat_path}!'
-        # Load denormalization (always needed on client side)
-        denormalize_action['norm_stats'] = data_stat_path
-        self.denormalize_action = build_transform_from_cfg(denormalize_action)
-        # Build dataset preprocessing (skipped for remote — server handles it)
-        if self._use_remote:
+
+        if self._use_offload:
+            # Remote mode: server handles denormalization and preprocessing
             self.dataset = None
+            self.denormalize_action = None
         else:
+            data_stat_path = os.path.join(
+                Path(self.ckpt_path).resolve().parent.parent,
+                'dataset_statistics.json')  # noqa: E501
+            assert os.path.exists(data_stat_path), \
+                f'Dataset statistics file not found at {data_stat_path}!'
+            denormalize_action['norm_stats'] = data_stat_path
+            self.denormalize_action = build_transform_from_cfg(
+                denormalize_action)
             dataset['task_suite_name'] = task_suite_name
             dataset['norm_stats'] = data_stat_path
             self.dataset = build_dataset_from_cfg(dataset)
+
+            if os.path.isfile(data_stat_path):
+                with open(data_stat_path, 'r') as f:
+                    norm_stats = json.load(f)
+                self.vla.norm_stats = norm_stats
+            else:
+                overwatch.warning(
+                    'WARNING: No local dataset_statistics.json file found for current checkpoint.\n'  # noqa: E501
+                    'You can ignore this if you are loading the base VLA (i.e. not fine-tuned) checkpoint.'  # noqa: E501
+                    'Otherwise, you may run into errors when trying to call `predict_action()` due to an absent `unnorm_key`.'  # noqa: E501
+                )
+
         self.eval_chunk_size = eval_chunk_size
         self.model_family = model_family
         self.task_suite_name = task_suite_name
@@ -131,17 +143,6 @@ class LiberoEvalRunner:
         self.enable_mixed_precision_training = enable_mixed_precision_training
         self.distributed_state = overwatch.distributed_state
 
-        if os.path.isfile(data_stat_path):
-            with open(data_stat_path, 'r') as f:
-                norm_stats = json.load(f)
-            self.vla.norm_stats = norm_stats
-        else:
-            overwatch.warning(
-                'WARNING: No local dataset_statistics.json file found for current checkpoint.\n'  # noqa: E501
-                'You can ignore this if you are loading the base VLA (i.e. not fine-tuned) checkpoint.'  # noqa: E501
-                'Otherwise, you may run into errors when trying to call `predict_action()` due to an absent `unnorm_key`.'  # noqa: E501
-            )
-
     def run_setup(self):
         """Set up the evaluation environment and model."""
         set_seed_everywhere(self.seed)
@@ -151,7 +152,7 @@ class LiberoEvalRunner:
         self.vla.freeze_llm_backbone = True
         self.vla.freeze_projector = True
         self.vla.freeze_vlm_backbone = True
-        if not self._use_remote:
+        if not self._use_offload:
             self.vla.cuda(self.device_id)
 
     def run(self):
@@ -281,7 +282,7 @@ class LiberoEvalRunner:
                     # Phase 1: data preprocessing
                     _t0 = time.perf_counter()
                     obs['task_description'] = task_description
-                    if self._use_remote:
+                    if self._use_offload:
                         # Remote: send raw obs, server does preprocessing
                         obs['unnorm_key'] = unnorm_key
                         batch = obs
@@ -311,7 +312,7 @@ class LiberoEvalRunner:
                     _prof_ep['model_inference'] += time.perf_counter() - _t0
 
                     # Collect remote inference sub-phases
-                    if self._use_remote and hasattr(self.vla, '_last_profile'):
+                    if self._use_offload and hasattr(self.vla, '_last_profile'):
                         _lp = self.vla._last_profile
                         _prof_ep['serialize'] += _lp.get('serialize_ms', 0.0)
                         _prof_ep['network'] += _lp.get('network_ms', 0.0)
@@ -334,18 +335,22 @@ class LiberoEvalRunner:
                     for action in actions:
                         # Phase 4: denormalize
                         _t0 = time.perf_counter()
-                        inputs = dict(
-                            action=action,
-                            task_suite_name=self.task_suite_name,
-                        )
-                        action_denormed = self.denormalize_action(inputs)
+                        if self._use_offload:
+                            # Server already denormalized
+                            action_denormed = action
+                        else:
+                            inputs = dict(
+                                action=action,
+                                task_suite_name=self.task_suite_name,
+                            )
+                            action_denormed = self.denormalize_action(inputs)
                         _prof_ep['denormalize'] += time.perf_counter() - _t0
 
                         # Phase 5: env step
                         _t0 = time.perf_counter()
                         obs, reward, done, info = env.step(
                             action_denormed.tolist())
-                        if self._use_remote:
+                        if self._use_offload:
                             _first_img = next(
                                 (v for v in obs.values()
                                  if hasattr(v, 'shape') and len(
@@ -377,7 +382,7 @@ class LiberoEvalRunner:
                     for k in _prof_keys:
                         _msg += f'  {k}={_prof_ep[k]/n*1000:.1f}ms'
                     _msg += f'  total={_prof_ep["total"]/n*1000:.1f}ms'
-                    if self._use_remote:
+                    if self._use_offload:
                         _msg += (
                             f'\n  [Remote detail] '
                             f'serialize={_prof_ep["serialize"]/n:.1f}ms  '
@@ -392,7 +397,7 @@ class LiberoEvalRunner:
                     for k in _prof_keys:
                         _prof_global[k] += _prof_ep[k]
                     _prof_global['total'] += _prof_ep['total']
-                    if self._use_remote:
+                    if self._use_offload:
                         for rk in _remote_keys:
                             _prof_global[rk] += _prof_ep[rk]
                     _prof_global_steps += _prof_ep_steps
@@ -445,7 +450,7 @@ class LiberoEvalRunner:
             for k in _prof_keys:
                 _msg += f'  {k}={_prof_global[k]/n*1000:.1f}ms'
             _msg += f'  total={_prof_global["total"]/n*1000:.1f}ms'
-            if self._use_remote:
+            if self._use_offload:
                 _msg += (
                     f'\n  [Remote detail] '
                     f'serialize={_prof_global["serialize"]/n:.1f}ms  '

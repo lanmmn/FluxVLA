@@ -36,9 +36,8 @@ class MsgSerializer:
 
     @staticmethod
     def _decode(obj):
-        """msgpack 反序列化钩子: 检测并还原自定义类型。"""
-        if not isinstance(obj, dict):   # 非 dict 直接返回(str, int, list 等原生类型)
-            return obj
+        """msgpack 反序列化钩子: 检测并还原自定义类型。
+        注意: object_hook 保证 obj 一定是 dict,无需 isinstance 检查。"""
         if "__ndarray__" in obj:        # 发现 ndarray 标记 → 这是我们自己编码的 numpy 数组
             return np.load(             # 从 .npy 格式的字节流中重建 numpy 数组
                 io.BytesIO(obj["data"]),  # 把 bytes 包装成文件流供 np.load 读取
@@ -71,11 +70,17 @@ class ObsSerializer:
 
     JPEG_QUALITY = 95
 
+    # 白名单: 只对已知 RGB 相机 key 做 JPEG 有损压缩,
+    # 避免深度图/分割掩码等 uint8 HWC 数据被 JPEG 引入不可逆伪影
+    JPEG_KEYS = {'cam_high', 'cam_left_wrist', 'cam_right_wrist',
+                 'agentview_image', 'robot0_eye_in_hand_image'}
+
     @staticmethod
     def to_bytes(obs: dict) -> bytes:
         encoded = {}
         for k, v in obs.items():
-            if isinstance(v, np.ndarray) and v.ndim == 3 and v.dtype == np.uint8:
+            if (isinstance(v, np.ndarray) and v.ndim == 3
+                    and v.dtype == np.uint8 and k in ObsSerializer.JPEG_KEYS):
                 _, jpg = cv2.imencode(
                     '.jpg', v,
                     [cv2.IMWRITE_JPEG_QUALITY, ObsSerializer.JPEG_QUALITY])
@@ -90,19 +95,16 @@ class ObsSerializer:
 
     @staticmethod
     def from_bytes(data: bytes) -> dict:
-        raw = msgpack.unpackb(data)
+        raw = msgpack.unpackb(data, raw=False)  # raw=False: key 统一为 str
         obs = {}
         for k, v in raw.items():
-            k = k.decode() if isinstance(k, bytes) else k
             if isinstance(v, dict):
-                if b"__jpeg__" in v or "__jpeg__" in v:
-                    jpg_data = v.get(b"data", v.get("data"))
+                if "__jpeg__" in v:
                     obs[k] = cv2.imdecode(
-                        np.frombuffer(jpg_data, np.uint8), cv2.IMREAD_COLOR)
-                elif b"__ndarray__" in v or "__ndarray__" in v:
-                    npy_data = v.get(b"data", v.get("data"))
+                        np.frombuffer(v["data"], np.uint8), cv2.IMREAD_COLOR)
+                elif "__ndarray__" in v:
                     obs[k] = np.load(
-                        io.BytesIO(npy_data), allow_pickle=False)
+                        io.BytesIO(v["data"]), allow_pickle=False)
                 else:
                     obs[k] = v
             elif isinstance(v, bytes):
@@ -210,85 +212,3 @@ class PolicyServer:
     def close(self):
         """从外部(另一个线程)优雅地停止服务器。run() 会在下次 poll 超时后退出。"""
         self.running = False
-
-
-# =============================================================================
-# Client 端: 连接远程 Server,发送请求,接收响应
-# =============================================================================
-class PolicyClient(BasePolicy):
-    """ZMQ REQ 客户端,与远程 PolicyServer 通信。继承 BasePolicy 使其接口透明。"""
-    # 继承 BasePolicy 的意义: 调用方不需要知道推理是本地还是远程的,接口完全一致
-
-    def __init__(
-        self,
-        host: str = "localhost",       # 服务器地址
-        port: int = 5555,              # 服务器端口
-        timeout_ms: int = 15000,       # 接收超时(毫秒),超时后抛 ZMQError
-        api_token: str | None = None,  # API 令牌,需与 server 端一致
-    ):
-        super().__init__(strict=False)  # 调用 BasePolicy.__init__,关闭 strict 模式(校验在 server 端做)
-        self.context = zmq.Context()    # 创建 ZMQ 上下文
-        self.host = host                # 保存连接参数,重连时需要
-        self.port = port
-        self.timeout_ms = timeout_ms
-        self.api_token = api_token
-        self._init_socket()             # 初始化并连接 socket
-
-    def _init_socket(self):
-        """初始化(或重新初始化) REQ socket 并连接到 server。"""
-        if hasattr(self, "socket") and not self.socket.closed:  # 如果已有旧 socket 且未关闭
-            self.socket.close()                                  # 先关掉旧的,避免资源泄漏
-        self.socket = self.context.socket(zmq.REQ)               # 创建 REQ(Request) socket
-        self.socket.setsockopt(zmq.RCVTIMEO, self.timeout_ms)   # 设置接收超时,防止永久阻塞
-        self.socket.connect(f"tcp://{self.host}:{self.port}")    # 连接到 server(非阻塞,ZMQ 会自动重试)
-
-    def call_endpoint(
-        self, endpoint: str, data: dict | None = None, requires_input: bool = True
-    ) -> Any:
-        """通用 endpoint 调用: 构造请求 → 序列化发送 → 等待响应 → 反序列化返回。"""
-        request: dict = {"endpoint": endpoint}   # 构造请求字典,指定要调用的 endpoint
-        if requires_input:                       # 如果 endpoint 需要输入数据
-            request["data"] = data               # 将数据挂在 "data" 字段下
-        if self.api_token:                       # 如果配置了 API token
-            request["api_token"] = self.api_token  # 附加到请求中供 server 校验
-
-        self.socket.send(MsgSerializer.to_bytes(request))  # 序列化并发送请求
-        message = self.socket.recv()                        # 阻塞等待响应(受 RCVTIMEO 超时保护)
-        response = MsgSerializer.from_bytes(message)        # 反序列化响应
-
-        if isinstance(response, dict) and "error" in response:  # 检查 server 是否返回了错误
-            raise RuntimeError(f"Server error: {response['error']}")  # 将 server 错误转为本地异常
-        return response                                     # 返回正常结果
-
-    def ping(self) -> bool:
-        """健康检查: 尝试 ping server,成功返回 True,失败时重建 socket 并返回 False。"""
-        try:
-            self.call_endpoint("ping", requires_input=False)  # 发送 ping 请求
-            return True                                        # 收到响应 → 连接正常
-        except (zmq.error.ZMQError, RuntimeError):            # 超时或其他错误
-            self._init_socket()                                # 重建 socket(ZMQ REQ socket 出错后状态会混乱)
-            return False                                       # 返回连接失败
-
-    def kill_server(self):
-        """远程关闭 server: 发送 kill 指令。"""
-        self.call_endpoint("kill", requires_input=False)
-
-    def _get_action(
-        self, observation: dict[str, Any], options: dict[str, Any] | None = None
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """实现 BasePolicy._get_action: 将推理请求转发到远程 server。"""
-        response = self.call_endpoint(
-            "get_action", {"observation": observation, "options": options}
-        )
-        return tuple(response)  # msgpack 反序列化后是 list,转回 tuple 匹配接口签名 (action, info)
-
-    def reset(self, options: dict[str, Any] | None = None) -> dict[str, Any]:
-        """实现 BasePolicy.reset: 将重置请求转发到远程 server。"""
-        return self.call_endpoint("reset", {"options": options})
-
-    def close(self):
-        """释放客户端资源: 关闭 socket 和 ZMQ 上下文。"""
-        if not self.socket.closed:                       # 避免重复关闭
-            self.socket.setsockopt(zmq.LINGER, 0)        # LINGER=0: 不等待未发送的消息,立即关闭
-            self.socket.close()                          # 关闭 socket
-        self.context.term()                              # 终止 ZMQ 上下文

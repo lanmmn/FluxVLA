@@ -97,6 +97,7 @@ model = dict(
         use_adarms=True,
         use_cache=True,
         vocab_size=257152),
+    attention_implementation='flex',
     freeze_llm_backbone=False,
     freeze_vision_backbone=False,
     pretrained_name_or_path=  # noqa: E251
@@ -205,12 +206,12 @@ runner = dict(
 
 eval = dict(
     type='LiberoEvalRunner',
-    remote_inference=dict(
-        enabled=False,       # Set True to use remote GPU server for inference
-        backend='zmq',      # 'grpc' or 'zmq'
-        host='0.0.0.0',    # server address
-        port=5555,          # server port (grpc: 50051, zmq: 5555)
-        timeout_s=30.0,      # per-request timeout (seconds)
+    offload_inference=dict(
+        enabled=False,  # Set True to offload inference to GPU server
+        backend='zmq',  # 'grpc' or 'zmq'
+        host='0.0.0.0',  # server address
+        port=5555,  # server port (grpc: 50051, zmq: 5555)
+        timeout_s=30.0,  # per-request timeout (seconds)
     ),
     task_suite_name='libero_10',
     model_family='pi0',

@@ -24,8 +24,10 @@ from torch.distributed.fsdp.wrap import _or_policy
 from fluxvla.engines import (VLAS, build_llm_backbone_from_cfg,
                              build_projector_from_cfg)
 from fluxvla.engines.utils.model_utils import (apply_rotary_pos_emb,
+                                               create_pi05_block_mask,
                                                create_sinusoidal_pos_embedding,
                                                eager_attention_forward,
+                                               flex_attention_forward,
                                                gated_residual,
                                                make_att_2d_masks, sample_beta)
 from fluxvla.engines.utils.overwatch import initialize_overwatch
@@ -193,9 +195,7 @@ class PI0FlowMatching(BaseVLA):
         if self.attention_implementation == 'fa2':
             raise NotImplementedError('FA2 is not implemented (yet)')
         elif self.attention_implementation == 'flex':
-            # attention_interface = flex_attention_forward
-            raise NotImplementedError(
-                'Flex attention is not implemented (yet)')
+            attention_interface = flex_attention_forward
         elif self.attention_implementation == 'eager':
             attention_interface = eager_attention_forward
         elif self.attention_implementation == 'xformer':
@@ -630,11 +630,16 @@ class PI0FlowMatching(BaseVLA):
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
 
-        attention_masks = make_att_2d_masks(pad_masks, att_masks)
         position_ids = torch.cumsum(pad_masks, dim=1) - 1
 
         # Prepare attention masks
-        att_2d_masks_4d = self._prepare_attention_masks_4d(attention_masks)
+        if self.attention_implementation == 'flex':
+            att_2d_masks_4d = create_pi05_block_mask(
+                att_masks, pad_masks, device=att_masks.device)
+        else:
+            attention_masks = make_att_2d_masks(pad_masks, att_masks)
+            att_2d_masks_4d = self._prepare_attention_masks_4d(
+                attention_masks)
 
         suffix_out, _ = self.forward_model(
             inputs_embeds=inputs_embeds,

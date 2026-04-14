@@ -51,8 +51,8 @@ fluxvla/remote/
 ```python
 # 成功
 {
-    "action_data": bytes,    # torch.save 序列化的 action tensor
-    "infer_time": 0.025,     # 服务端推理耗时（秒）
+    "action_data": bytes,    # torch.save 序列化的 action tensor（已反归一化）
+    "infer_time": 0.025,     # 服务端推理 + 预处理耗时（秒）
 }
 
 # 失败
@@ -60,6 +60,8 @@ fluxvla/remote/
     "error": "Error message"
 }
 ```
+
+> **注意**：action 已在 server 端完成反归一化，client 收到的是可直接执行的机器人指令。
 
 ## 核心类详解
 
@@ -99,16 +101,33 @@ class VLAInferPipeline:
 
 将 `VLAInferPipeline` 包装为 `BasePolicy`，注册为 PolicyServer 的 endpoint。
 
+```python
+class VLAPolicy(BasePolicy):
+    def __init__(self, pipeline, dataset=None,
+                 denormalize_action=None, task_suite_name=""):
+        # pipeline: VLAInferPipeline 推理管道
+        # dataset: 可选的预处理管道（server-side preprocessing）
+        # denormalize_action: 可选的反归一化 transform（server-side denormalization）
+        # task_suite_name: denormalization 查找 key（如 "libero_10"）
+```
+
+**predict_action 流程**：
+1. 反序列化 raw obs（JPEG 解码）
+2. 预处理（dataset transforms: image resize/normalize, tokenize, state normalize）
+3. 模型推理（GPU）
+4. **action 反归一化**（如果配置了 `denormalize_action`）
+5. 序列化 action 返回
+
 **注册的端点**：
 
 | Endpoint | 功能 | 需要输入 |
 |----------|------|----------|
-| `predict_action` | tensor batch 推理 | Yes |
+| `predict_action` | raw obs → 反归一化后的 action | Yes |
 | `get_status` | 服务端状态查询 | No |
 | `ping` | 健康检查 | No |
 | `kill` | 远程关闭服务 | No |
 
-**性能统计**：每 50 次请求打印一次 deserialize/infer/serialize 耗时。
+**性能统计**：每 50 次请求打印一次 deserialize/preprocess/infer/serialize 耗时。
 
 ### RemoteVLAZmq (`remote_vla.py`)
 
@@ -145,42 +164,45 @@ vla.norm_stats = {...}            # 支持设置 norm_stats
 LiberoEvalRunner.run()
     |
     v
-obs = env.step(action)                    # LIBERO 环境产生观测
+obs = env.step(action)                       # LIBERO 环境产生观测
     |
-    v
-batch, replay_img = self.dataset(obs)     # 数据预处理
-batch["unnorm_key"] = "libero_10"         # 添加 denorm key
-    |
-    v
-actions = self.vla.predict_action(**batch) # <-- RemoteVLAZmq 或本地模型
-    |                                       |
-    | [远程路径]                              | [本地路径]
-    v                                       v
-RemoteVLAZmq.predict_action()             PI05FlowMatching.predict_action()
-    |
-    v
-torch.save(batch_cpu) -> bytes            # 序列化 ~500KB
-    |
-    v
-ZMQ REQ send -> [TCP 网络] -> ZMQ REP recv  # 网络传输
-    |
-    v
-VLAPolicy.predict_action()               # 服务端
-    |-- TensorSerializer.deserialize_batch()
-    |-- VLAInferPipeline.predict_action()  # GPU 推理
-    |-- TensorSerializer.serialize_actions()
-    |
-    v
-ZMQ REP send -> [TCP 网络] -> ZMQ REQ recv  # 返回
-    |
-    v
-torch.load(action_data, map_location=device)  # 反序列化到目标设备
-    |
-    v
-actions: Tensor (B, n_action_steps, action_dim)  # 返回给 runner
+    +--[本地路径]-------+--[远程路径]----------+
+    |                   |                      |
+    v                   v                      |
+ dataset(obs)        raw obs (dict)            |
+    |                   |                      |
+    v                   v                      |
+ predict_action()   RemoteVLAZmq              |
+ (本地 GPU)          .predict_action()         |
+    |                   |                      |
+    |                   v                      |
+    |              ObsSerializer.to_bytes()    |
+    |                   |  (~100KB JPEG)       |
+    |                   v                      |
+    |              ZMQ REQ send ──► ZMQ REP recv
+    |                                  |
+    |                   VLAPolicy.predict_action()  # 服务端
+    |                   |-- ObsSerializer.from_bytes()
+    |                   |-- dataset(obs) → tensor batch
+    |                   |-- VLAInferPipeline.predict_action()  # GPU 推理
+    |                   |-- denormalize_action()  # 反归一化
+    |                   |-- TensorSerializer.serialize_actions()
+    |                                  |
+    |              ZMQ REP send ──► ZMQ REQ recv
+    |                   |
+    |                   v
+    |              torch.load(action_data)
+    |                   |
+    v                   v
+ denormalize()    actions: 已反归一化，可直接执行
+    |                   |
+    v                   v
+ env.step(action)   env.step(action.tolist())
 ```
 
 ### Tensor 规格
+
+**Server 内部 tensor（预处理后）**：
 
 | 字段 | Shape | Dtype | 说明 |
 |------|-------|-------|------|
@@ -189,28 +211,55 @@ actions: Tensor (B, n_action_steps, action_dim)  # 返回给 runner
 | `lang_tokens` | (1, seq_len) | int64 | tokenized 任务描述 |
 | `lang_masks` | (1, seq_len) | bool | token 掩码 |
 | `states` | (1, state_dim) | float32 | 本体感知状态 |
-| `actions` (output) | (1, n_action_steps, action_dim) | float32 | 预测动作序列 |
+
+**返回给 client 的 action**：
+
+| 字段 | Shape | Dtype | 说明 |
+|------|-------|-------|------|
+| `actions` (output) | (1, n_action_steps, action_dim) | float32 | 反归一化后的动作序列，可直接执行 |
 
 ## Config 集成方式
 
-`LiberoEvalRunner.__init__()` 通过 `remote_inference` 参数决定使用本地还是远程模型：
+### Client 端
+
+`LiberoEvalRunner.__init__()` 通过 `offload_inference` 参数决定使用本地还是远程模型：
 
 ```python
 # fluxvla/engines/runners/libero_eval_runner.py
 
-if self._use_remote:
-    _backend = remote_inference.get('backend', 'grpc')
-    if _backend == 'zmq':
-        from fluxvla.remote import RemoteVLAZmq
-        self.vla = RemoteVLAZmq(...)
-    else:
-        from remote_vla import RemoteVLA  # gRPC 后端
-        self.vla = RemoteVLA(...)
+if self._use_offload:
+    # 远程模式：不加载模型、不构建 dataset、不构建 denormalize_action
+    # 不需要 dataset_statistics.json
+    self.vla = RemoteVLAZmq(...)
+    self.dataset = None
+    self.denormalize_action = None
 else:
-    self.vla = build_vla_from_cfg(cfg.model).eval()  # 本地模型
+    # 本地模式：完整加载
+    self.vla = build_vla_from_cfg(cfg.model).eval()
+    self.dataset = build_dataset_from_cfg(dataset)
+    self.denormalize_action = build_transform_from_cfg(denormalize_action)
 ```
 
-之后 `self.vla.predict_action(**batch)` 调用方式完全一致，无需在推理循环中区分。
+### Server 端
+
+`serve_vla_zmq.py` 从 config 中读取 `denormalize_action` 配置并传给 `VLAPolicy`：
+
+```python
+# zmq_msgpack/serve_vla_zmq.py
+
+# 从 config 构建反归一化 transform
+denorm_cfg = dict(cfg.eval.denormalize_action)
+denorm_cfg['norm_stats'] = data_stat_path
+denormalize_action = build_transform_from_cfg(denorm_cfg)
+
+# 传给 server
+server = create_vla_server(
+    pipeline=pipeline,
+    dataset=dataset,
+    denormalize_action=denormalize_action,
+    task_suite_name=cfg.eval.task_suite_name,
+)
+```
 
 ## 性能 Profiling
 

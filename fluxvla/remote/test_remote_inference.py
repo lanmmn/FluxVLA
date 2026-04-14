@@ -108,12 +108,17 @@ def test_end_to_end(port, dataset_cls, obs, action_shape, label):
         pipeline, host='127.0.0.1', port=port, dataset=dataset_cls())
     t = threading.Thread(target=server.run, daemon=True)
     t.start()
-    time.sleep(0.5)
 
     client = RemoteVLAZmq(
         host='127.0.0.1', port=port, timeout_s=10.0, device='cuda:0')
+    # 轮询等待 server 就绪,最多 5 秒
+    for _ in range(50):
+        if client.ping():
+            break
+        time.sleep(0.1)
+    else:
+        raise RuntimeError("Server failed to start within 5s")
     try:
-        assert client.ping(), 'Ping failed'
         actions = client.predict_action(**obs)
         assert actions.shape == torch.Size(action_shape), (
             f'Shape mismatch: {actions.shape} != {action_shape}')
