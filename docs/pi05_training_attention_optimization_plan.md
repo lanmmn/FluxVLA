@@ -10,19 +10,19 @@
 
 经过深入分析代码和量化瓶颈后，**真正的性能瓶颈不在 for 循环，而在 eager attention 实现本身**。
 
----
+______________________________________________________________________
 
 ## 2. 瓶颈分析
 
 ### 2.1 瓶颈排序（按实际影响）
 
-| 排名 | 瓶颈 | 影响 | 原因 |
-|:----:|------|:----:|------|
-| **#1** | eager attention（手动 matmul） | **高** | 5 次独立 HBM 读写，~593MB/层 |
-| **#2** | 4D mask 物化 | **中** | 分配 (B,1,703,703) float32 ≈15MB |
-| **#3** | `out_emb.clone()` 冗余拷贝 | **低** | 每层每模型一次 clone，~22MB/层 |
-| **#4** | RoPE dummy tensor 重复分配 | **极低** | 每层分配一次零张量 |
-| **#5** | Python for 循环（2 次迭代） | **可忽略** | ~20μs/层，占总时间 <0.1% |
+|  排名  | 瓶颈                           |    影响    | 原因                             |
+| :----: | ------------------------------ | :--------: | -------------------------------- |
+| **#1** | eager attention（手动 matmul） |   **高**   | 5 次独立 HBM 读写，~593MB/层     |
+| **#2** | 4D mask 物化                   |   **中**   | 分配 (B,1,703,703) float32 ≈15MB |
+| **#3** | `out_emb.clone()` 冗余拷贝     |   **低**   | 每层每模型一次 clone，~22MB/层   |
+| **#4** | RoPE dummy tensor 重复分配     |  **极低**  | 每层分配一次零张量               |
+| **#5** | Python for 循环（2 次迭代）    | **可忽略** | ~20μs/层，占总时间 \<0.1%        |
 
 ### 2.2 为什么 Python for 循环不是瓶颈？
 
@@ -50,11 +50,12 @@
 **每层 HBM 搬运量 ~593MB**。18 层 × 2（forward + backward）= ~21GB 的冗余 HBM 操作。
 
 换成 SDPA/FlexAttention 后，全部融合为一个 kernel：
+
 - Q@K^T → mask → softmax → @V 在 SRAM 中完成
 - 不物化 (B,8,703,703) 的中间矩阵
 - **HBM 搬运降至 ~49MB/层，12x 减少**
 
----
+______________________________________________________________________
 
 ## 3. 优化方案
 
@@ -104,17 +105,17 @@ elif self.attention_implementation == 'sdpa':
 
 #### 为什么先 SDPA 而非直接上 FlexAttention？
 
-| | SDPA | FlexAttention |
-|--|------|---------------|
-| 需要 torch.compile | 否 | 是 |
-| FSDP 兼容性 | 成熟 | 需验证 |
-| 改动量 | ~30 行 | ~80 行 |
-| 首次开销 | 无 | 编译 30-60s |
-| GQA 支持 | enable_gqa=True | enable_gqa=True |
+|                    | SDPA            | FlexAttention   |
+| ------------------ | --------------- | --------------- |
+| 需要 torch.compile | 否              | 是              |
+| FSDP 兼容性        | 成熟            | 需验证          |
+| 改动量             | ~30 行          | ~80 行          |
+| 首次开销           | 无              | 编译 30-60s     |
+| GQA 支持           | enable_gqa=True | enable_gqa=True |
 
 SDPA 是风险最低、收益最高的第一步。
 
----
+______________________________________________________________________
 
 ### Phase 2: 替换 SDPA 为 FlexAttention（P1）
 
@@ -197,22 +198,23 @@ Q ↓
 
 #### 风险
 
-| 风险 | 概率 | 应对 |
-|------|:----:|------|
-| torch.compile + FSDP 冲突 | 低 | 只 compile flex_attention 一个函数，不涉及参数管理 |
-| torch.compile + gradient checkpoint | 低 | PyTorch 2.6 支持 recompute 时重调 compiled kernel |
-| head_dim=256 Triton kernel shared memory | 中 | H100 228KB 足够；A100 需测试 |
-| 首次编译耗时 | 确定 | seq_len=703 固定，只编译一次 |
+| 风险                                     | 概率 | 应对                                               |
+| ---------------------------------------- | :--: | -------------------------------------------------- |
+| torch.compile + FSDP 冲突                |  低  | 只 compile flex_attention 一个函数，不涉及参数管理 |
+| torch.compile + gradient checkpoint      |  低  | PyTorch 2.6 支持 recompute 时重调 compiled kernel  |
+| head_dim=256 Triton kernel shared memory |  中  | H100 228KB 足够；A100 需测试                       |
+| 首次编译耗时                             | 确定 | seq_len=703 固定，只编译一次                       |
 
 **回退策略**：一行配置切换 `attention_implementation='sdpa'` 或 `'eager'`
 
----
+______________________________________________________________________
 
 ### Phase 3: 消除冗余分配（P2，低优先级）
 
 #### 3a. 移除 `clone()`
 
 `pi0_flowmatching.py:432`：
+
 ```python
 after_first_residual = out_emb.clone()  # 每层×2模型 ≈ 22MB/层
 ```
@@ -224,24 +226,25 @@ after_first_residual = out_emb.clone()  # 每层×2模型 ≈ 22MB/层
 #### 3b. 缓存 RoPE dummy tensor
 
 `pi0_flowmatching.py:387-393`：
+
 ```python
 dummy_tensor = torch.zeros(B, S, D, ...)  # 每层分配一次
 ```
 
 改为 `__init__` 中 `register_buffer` 一次分配。节省 18 次 memset kernel。
 
----
+______________________________________________________________________
 
 ## 4. 不做的事
 
-| 不做 | 原因 |
-|------|------|
-| 优化 Python for 循环 | 2 次迭代，<0.1% 开销，dim 不同无法 batch |
-| torch.compile 整个 transformer 层 | FSDP + gradient checkpoint + compile 三者组合风险高 |
-| 训练路径写 Triton kernel | 推理路径已有 Triton 实现，训练用 SDPA/FlexAttention 收益足够 |
-| 并行化 prefix/suffix O_proj + FFN | 不同参数不同形状，无法 batch；GPU 利用率已经很高 |
+| 不做                              | 原因                                                         |
+| --------------------------------- | ------------------------------------------------------------ |
+| 优化 Python for 循环              | 2 次迭代，\<0.1% 开销，dim 不同无法 batch                    |
+| torch.compile 整个 transformer 层 | FSDP + gradient checkpoint + compile 三者组合风险高          |
+| 训练路径写 Triton kernel          | 推理路径已有 Triton 实现，训练用 SDPA/FlexAttention 收益足够 |
+| 并行化 prefix/suffix O_proj + FFN | 不同参数不同形状，无法 batch；GPU 利用率已经很高             |
 
----
+______________________________________________________________________
 
 ## 5. 数据流对比
 
@@ -286,18 +289,18 @@ att_masks (B,703) → cumsum → create_pi05_block_mask → BlockMask 对象 (~K
                                   ~49 MB/层 + 跳过 ~11% blocks
 ```
 
----
+______________________________________________________________________
 
 ## 6. 预期收益汇总
 
-| 方案 | Attention 加速 | 整体训练加速 | 显存节省 | 改动量 | 风险 |
-|------|:-------------:|:-----------:|:--------:|:------:|:----:|
-| Phase 1: SDPA | 3-8x | 1.3-1.8x | ~15 MB/batch (mask 仍物化) | ~30 行 | 低 |
-| Phase 2: FlexAttention | 再 1.2-1.5x | 再 1.1-1.2x | 额外节省 mask O(N²) 内存 | ~80 行 | 中 |
-| Phase 3: 清理 | <1% | <1% | ~22 MB/层 (clone) | ~10 行 | 低 |
-| **总计** | **5-12x** | **~1.5-2x** | **显著** | **~120 行** | |
+| 方案                   | Attention 加速 | 整体训练加速 |          显存节省          |   改动量    | 风险 |
+| ---------------------- | :------------: | :----------: | :------------------------: | :---------: | :--: |
+| Phase 1: SDPA          |      3-8x      |   1.3-1.8x   | ~15 MB/batch (mask 仍物化) |   ~30 行    |  低  |
+| Phase 2: FlexAttention |  再 1.2-1.5x   | 再 1.1-1.2x  |  额外节省 mask O(N²) 内存  |   ~80 行    |  中  |
+| Phase 3: 清理          |      \<1%      |     \<1%     |     ~22 MB/层 (clone)      |   ~10 行    |  低  |
+| **总计**               |   **5-12x**    | **~1.5-2x**  |          **显著**          | **~120 行** |      |
 
----
+______________________________________________________________________
 
 ## 7. 验证方式
 
@@ -340,18 +343,18 @@ python train.py configs/pi05/pi05_paligemma_libero_10_full_finetune.py
 # 对比 eager → sdpa → flex 的差异
 ```
 
----
+______________________________________________________________________
 
 ## 8. 相关文件索引
 
-| 文件 | 角色 |
-|------|------|
-| `fluxvla/engines/utils/model_utils.py` | attention 实现（eager/sdpa/flex） |
-| `fluxvla/models/vlas/pi0_flowmatching.py` | 训练主模型，`_forward_transformer_layers` |
-| `fluxvla/models/vlas/pi05_flowmatching.py` | Pi0.5 子类 |
+| 文件                                                 | 角色                                      |
+| ---------------------------------------------------- | ----------------------------------------- |
+| `fluxvla/engines/utils/model_utils.py`               | attention 实现（eager/sdpa/flex）         |
+| `fluxvla/models/vlas/pi0_flowmatching.py`            | 训练主模型，`_forward_transformer_layers` |
+| `fluxvla/models/vlas/pi05_flowmatching.py`           | Pi0.5 子类                                |
 | `fluxvla/models/vlas/pi05_flowmatching_inference.py` | 推理优化版（Triton + CUDA Graph，供参考） |
-| `fluxvla/ops/triton/attention_triton_ops.py` | 推理 Triton kernels（供参考） |
-| `fluxvla/models/backbones/llms/condition_gemma.py` | AdaRMS Norm 实现 |
-| `docs/flexattention_pi05_v1.md` | FlexAttention 详细设计文档 |
-| `test/test_ops/test_flashattn.py` | 测试文件 |
-| `configs/pi05/*.py` | 训练配置 |
+| `fluxvla/ops/triton/attention_triton_ops.py`         | 推理 Triton kernels（供参考）             |
+| `fluxvla/models/backbones/llms/condition_gemma.py`   | AdaRMS Norm 实现                          |
+| `docs/flexattention_pi05_v1.md`                      | FlexAttention 详细设计文档                |
+| `test/test_ops/test_flashattn.py`                    | 测试文件                                  |
+| `configs/pi05/*.py`                                  | 训练配置                                  |

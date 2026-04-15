@@ -13,36 +13,37 @@
 
 变体较少，核心是理解它在不同位置的**语义角色**。
 
----
+______________________________________________________________________
 
 ### 1.2 Normalization
 
-| 变体 | 典型用途 | 核心公式 / 区别 | 本 repo 对应 |
-|------|---------|----------------|-------------|
-| **LayerNorm** | Transformer 标配 | `(x - mean) / std * γ + β`，对最后一维归一化 | `nn.LayerNorm` |
-| **RMSNorm** | Llama / Gemma | 去掉 mean centering，只做 `x / rms(x) * γ`，更快 | `GemmaRMSNorm` |
-| **AdaLN** | DiT (Gr00t) | LayerNorm + 外部条件（timestep）生成 scale/shift | `cross_attention_dit.py:AdaLayerNorm` |
-| **AdaRMS** | Pi0.5 expert 侧 | RMSNorm + 外部条件化 | `condition_gemma.py` |
-| **GroupNorm** | CNN / UNet / Diffusion | 按 channel group 归一化 | — |
-| **BatchNorm** | 传统 CNN | 按 batch 维归一化，训练/推理行为不一致 | — |
+| 变体          | 典型用途               | 核心公式 / 区别                                  | 本 repo 对应                          |
+| ------------- | ---------------------- | ------------------------------------------------ | ------------------------------------- |
+| **LayerNorm** | Transformer 标配       | `(x - mean) / std * γ + β`，对最后一维归一化     | `nn.LayerNorm`                        |
+| **RMSNorm**   | Llama / Gemma          | 去掉 mean centering，只做 `x / rms(x) * γ`，更快 | `GemmaRMSNorm`                        |
+| **AdaLN**     | DiT (Gr00t)            | LayerNorm + 外部条件（timestep）生成 scale/shift | `cross_attention_dit.py:AdaLayerNorm` |
+| **AdaRMS**    | Pi0.5 expert 侧        | RMSNorm + 外部条件化                             | `condition_gemma.py`                  |
+| **GroupNorm** | CNN / UNet / Diffusion | 按 channel group 归一化                          | —                                     |
+| **BatchNorm** | 传统 CNN               | 按 batch 维归一化，训练/推理行为不一致           | —                                     |
 
 **为什么 LLM 时代从 LayerNorm 转向 RMSNorm？**
+
 - RMSNorm 省去了 mean 计算，训练速度快 ~5-10%
 - 实验表明去掉 centering 对性能几乎无影响
 - Llama 率先采用后成为事实标准
 
----
+______________________________________________________________________
 
 ### 1.3 Attention
 
-| 变体 | 核心区别 | 典型用途 |
-|------|---------|---------|
-| **Self-Attention** | Q/K/V 来自同一序列 | Transformer encoder/decoder |
-| **Cross-Attention** | Q 来自一边，K/V 来自另一边 | Gr00t DiT 的偶数层 |
-| **Multi-Head Attention (MHA)** | 标准多头，Q/K/V head 数相同 | GPT-2、BERT |
-| **Multi-Query Attention (MQA)** | K/V 只有 1 个 head，Q 多个 head | PaLM、推理场景 |
-| **Grouped-Query Attention (GQA)** | K/V 共享 group heads，介于 MHA 和 MQA 之间 | Llama 2/3、Gemma |
-| **Joint Attention** | 多个模态拼接后在同一矩阵中 attend，mask 控制可见性 | Pi0.5 |
+| 变体                              | 核心区别                                           | 典型用途                    |
+| --------------------------------- | -------------------------------------------------- | --------------------------- |
+| **Self-Attention**                | Q/K/V 来自同一序列                                 | Transformer encoder/decoder |
+| **Cross-Attention**               | Q 来自一边，K/V 来自另一边                         | Gr00t DiT 的偶数层          |
+| **Multi-Head Attention (MHA)**    | 标准多头，Q/K/V head 数相同                        | GPT-2、BERT                 |
+| **Multi-Query Attention (MQA)**   | K/V 只有 1 个 head，Q 多个 head                    | PaLM、推理场景              |
+| **Grouped-Query Attention (GQA)** | K/V 共享 group heads，介于 MHA 和 MQA 之间         | Llama 2/3、Gemma            |
+| **Joint Attention**               | 多个模态拼接后在同一矩阵中 attend，mask 控制可见性 | Pi0.5                       |
 
 **本 repo 中的 attention 实现：**
 
@@ -63,41 +64,44 @@ Gemma: num_attention_heads=8, num_key_value_heads=1
 效果：KV cache 缩小 8x，推理显存大幅降低
 ```
 
----
+______________________________________________________________________
 
 ### 1.4 Position Encoding
 
-| 变体 | 核心思想 | 用在哪 |
-|------|---------|--------|
-| **Sinusoidal (Vaswani)** | 固定 sin/cos，不可学习 | 原始 Transformer、Pi0.5 timestep |
-| **Learned Embedding** | `nn.Embedding(max_len, dim)` | GPT-2、Gr00t action pos |
-| **RoPE** | 旋转位置编码，作用在 Q/K 上 | Llama、Gemma、Pi0.5 |
-| **ALiBi** | 不加 pos emb，直接在 attention score 上加偏置 | MPT、BLOOM |
+| 变体                     | 核心思想                                      | 用在哪                           |
+| ------------------------ | --------------------------------------------- | -------------------------------- |
+| **Sinusoidal (Vaswani)** | 固定 sin/cos，不可学习                        | 原始 Transformer、Pi0.5 timestep |
+| **Learned Embedding**    | `nn.Embedding(max_len, dim)`                  | GPT-2、Gr00t action pos          |
+| **RoPE**                 | 旋转位置编码，作用在 Q/K 上                   | Llama、Gemma、Pi0.5              |
+| **ALiBi**                | 不加 pos emb，直接在 attention score 上加偏置 | MPT、BLOOM                       |
 
 **RoPE 为什么成为主流？**
+
 - 天然支持相对位置
 - 推理时可外推到训练时未见过的长度
 - 不需要额外参数
 
 **本 repo 中：**
+
 ```python
 # model_utils.py
 cos, sin = self.llm_backbone.rotary_emb(dummy_tensor, position_ids)
 query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 ```
 
----
+______________________________________________________________________
 
 ### 1.5 Activation Function
 
-| 变体 | 公式 | 说明 |
-|------|------|------|
-| **ReLU** | `max(0, x)` | 经典，但有 dead neuron 问题 |
-| **GELU** | `x * Φ(x)`（Φ 是标准正态 CDF） | BERT / GPT 标配 |
-| **SiLU (Swish)** | `x * sigmoid(x)` | Llama / Gemma / Pi0.5 |
-| **GeGLU** | `GELU(xW₁) ⊙ xW₂` (Gated Linear Unit) | PaLM / Gemma FFN |
+| 变体             | 公式                                  | 说明                        |
+| ---------------- | ------------------------------------- | --------------------------- |
+| **ReLU**         | `max(0, x)`                           | 经典，但有 dead neuron 问题 |
+| **GELU**         | `x * Φ(x)`（Φ 是标准正态 CDF）        | BERT / GPT 标配             |
+| **SiLU (Swish)** | `x * sigmoid(x)`                      | Llama / Gemma / Pi0.5       |
+| **GeGLU**        | `GELU(xW₁) ⊙ xW₂` (Gated Linear Unit) | PaLM / Gemma FFN            |
 
 **Gemma FFN 结构（GeGLU 变体）：**
+
 ```python
 # 典型 Gemma MLP
 gate = self.gate_proj(x)      # W_gate
@@ -105,20 +109,21 @@ up   = self.up_proj(x)        # W_up
 x    = F.silu(gate) * up      # SiLU-gated
 x    = self.down_proj(x)      # W_down
 ```
+
 这是 3 个 Linear 组成的 FFN，比原始 Transformer 的 2 层 FFN 更强。
 
----
+______________________________________________________________________
 
 ### 1.6 Embedding
 
-| 变体 | 说明 |
-|------|------|
-| **Token Embedding** | `nn.Embedding(vocab_size, dim)`，离散 token 到连续向量 |
-| **Patch Embedding** | `nn.Conv2d(3, dim, patch_size, stride=patch_size)`，ViT 把图像切 patch |
-| **Timestep Embedding** | Sinusoidal → MLP，把连续 timestep 映射到高维，Diffusion 用 |
-| **Learnable Tokens** | `nn.Embedding(N, dim).weight`，可学习的"工作区"token，如 Gr00t 的 future_tokens |
+| 变体                   | 说明                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| **Token Embedding**    | `nn.Embedding(vocab_size, dim)`，离散 token 到连续向量                          |
+| **Patch Embedding**    | `nn.Conv2d(3, dim, patch_size, stride=patch_size)`，ViT 把图像切 patch          |
+| **Timestep Embedding** | Sinusoidal → MLP，把连续 timestep 映射到高维，Diffusion 用                      |
+| **Learnable Tokens**   | `nn.Embedding(N, dim).weight`，可学习的"工作区"token，如 Gr00t 的 future_tokens |
 
----
+______________________________________________________________________
 
 ## 2. 推荐学习路线
 
@@ -129,15 +134,18 @@ x    = self.down_proj(x)      # W_down
 #### 核心资源
 
 1. **Andrej Karpathy - "Let's build GPT from scratch"**
+
    - YouTube 搜 "Andrej Karpathy GPT"，约 2 小时
    - 从零写 self-attention、multi-head、layernorm、FFN
    - 一个视频理清 80% 的基础组件
 
 2. **The Illustrated Transformer** (Jay Alammar)
+
    - 搜 "jalammar illustrated transformer"
    - 图解每一步数据流，建立直觉
 
 3. **Attention Is All You Need** (Vaswani et al., 2017)
+
    - 原始论文，定义了 Transformer 的一切基础
    - 重点看 Section 3 (Model Architecture)
 
@@ -148,7 +156,7 @@ x    = self.down_proj(x)      # W_down
 - FFN 在 Transformer 中扮演什么角色？
 - Layer Norm 为什么放在 attention 前面（Pre-LN）而不是后面（Post-LN）？
 
----
+______________________________________________________________________
 
 ### 第二阶段：读源码理解变体（1-2 周）
 
@@ -183,7 +191,7 @@ x    = self.down_proj(x)      # W_down
 - 忽略 `XxxForCausalLM` 外层 wrapper，聚焦 `XxxModel` 和 `XxxDecoderLayer`
 - 对比 GPT-2 和 Llama 的差异，就能理解所有"现代化改进"
 
----
+______________________________________________________________________
 
 ### 第三阶段：理解 Diffusion / Flow Matching 变体（按需）
 
@@ -205,7 +213,7 @@ x    = self.down_proj(x)      # W_down
 - 解释 joint attention + flow matching 的设计动机
 - 为什么选择 segment-based mask 而不是 cross-attention
 
----
+______________________________________________________________________
 
 ### 第四阶段：进阶优化机制（按需）
 
@@ -228,7 +236,7 @@ x    = self.down_proj(x)      # W_down
 - 理解参数分片、all-gather、reduce-scatter
 - 本 repo 训练用 FSDP
 
----
+______________________________________________________________________
 
 ## 3. 快速查阅方法
 
@@ -239,42 +247,42 @@ x    = self.down_proj(x)      # W_down
 3. **搜索 "组件名 + explained"** — 如 "GQA attention explained"，通常有高质量博客
 4. **搜索 "组件名 + paper"** — 找到原始论文的 Method 章节
 
----
+______________________________________________________________________
 
 ## 4. 本 repo 组件速查表
 
-| 代码中看到的 | 它是什么 | 首选学习资源 |
-|-------------|---------|------------|
-| `GemmaRMSNorm` | RMSNorm 归一化 | Llama 论文 / HF Llama 源码 |
-| `apply_rotary_pos_emb` | RoPE 旋转位置编码 | "RoFormer" 论文 (Su et al.) |
-| `eager_attention_forward` | 朴素 scaled dot-product attention | Karpathy GPT 视频 |
-| `make_att_2d_masks` (cumsum) | Segment-based attention mask | Pi0 论文 / `docs/flexattention_pi05_v1.md` |
-| `AdaLayerNorm` | DiT 条件化 LayerNorm | DiT 论文 (Peebles & Xie) |
-| `SiLU` / `F.silu` | Swish 激活函数 | "Searching for Activation Functions" (Ramachandran et al.) |
-| `CategorySpecificLinear` | 按 embodiment 切换权重的 Linear | Gr00t 论文 / 直接读源码 |
-| `GQA` (1 KV head vs 8 Q head) | Grouped-Query Attention | "GQA" 论文 (Ainslie et al.) |
-| `create_sinusoidal_pos_embedding` | Sinusoidal timestep embedding | Vaswani 原始论文 / DDPM |
-| `SigLIP` (via PaliGemma) | 对比学习 vision encoder | SigLIP 论文 (Zhai et al.) |
-| `flow matching loss` | `MSE(v_predicted, noise - actions)` | Flow Matching 论文 (Lipman et al.) |
-| `Euler 积分` (predict_action) | ODE 求解器 | Flow Matching 论文 |
-| `FSDP` | 分布式参数分片训练 | PyTorch FSDP 官方教程 |
-| `gradient_checkpointing` | 用时间换显存 | "Training Deep Nets with Sublinear Memory" |
+| 代码中看到的                      | 它是什么                            | 首选学习资源                                               |
+| --------------------------------- | ----------------------------------- | ---------------------------------------------------------- |
+| `GemmaRMSNorm`                    | RMSNorm 归一化                      | Llama 论文 / HF Llama 源码                                 |
+| `apply_rotary_pos_emb`            | RoPE 旋转位置编码                   | "RoFormer" 论文 (Su et al.)                                |
+| `eager_attention_forward`         | 朴素 scaled dot-product attention   | Karpathy GPT 视频                                          |
+| `make_att_2d_masks` (cumsum)      | Segment-based attention mask        | Pi0 论文 / `docs/flexattention_pi05_v1.md`                 |
+| `AdaLayerNorm`                    | DiT 条件化 LayerNorm                | DiT 论文 (Peebles & Xie)                                   |
+| `SiLU` / `F.silu`                 | Swish 激活函数                      | "Searching for Activation Functions" (Ramachandran et al.) |
+| `CategorySpecificLinear`          | 按 embodiment 切换权重的 Linear     | Gr00t 论文 / 直接读源码                                    |
+| `GQA` (1 KV head vs 8 Q head)     | Grouped-Query Attention             | "GQA" 论文 (Ainslie et al.)                                |
+| `create_sinusoidal_pos_embedding` | Sinusoidal timestep embedding       | Vaswani 原始论文 / DDPM                                    |
+| `SigLIP` (via PaliGemma)          | 对比学习 vision encoder             | SigLIP 论文 (Zhai et al.)                                  |
+| `flow matching loss`              | `MSE(v_predicted, noise - actions)` | Flow Matching 论文 (Lipman et al.)                         |
+| `Euler 积分` (predict_action)     | ODE 求解器                          | Flow Matching 论文                                         |
+| `FSDP`                            | 分布式参数分片训练                  | PyTorch FSDP 官方教程                                      |
+| `gradient_checkpointing`          | 用时间换显存                        | "Training Deep Nets with Sublinear Memory"                 |
 
----
+______________________________________________________________________
 
 ## 5. 论文精选列表
 
 按重要性排序，覆盖本 repo 涉及的所有关键技术：
 
-| # | 论文 | 年份 | 和本 repo 的关系 |
-|---|------|------|-----------------|
-| 1 | Attention Is All You Need | 2017 | 一切的基础 |
-| 2 | Llama 2 | 2023 | RMSNorm + RoPE + GQA，现代 LLM 标准架构 |
-| 3 | Flow Matching for Generative Modeling | 2023 | Pi0 / Gr00t 的 action 生成方法 |
-| 4 | Scalable Diffusion Models with Transformers (DiT) | 2023 | Gr00t head 的理论基础 |
-| 5 | Pi0: A Vision-Language-Action Flow Model | 2024 | Pi0.5 的前身，joint attention 设计 |
-| 6 | Pi0.5 | 2025 | 本 repo 主模型架构 |
-| 7 | FlashAttention | 2022 | 理解 attention 优化的基础 |
-| 8 | RoFormer (RoPE) | 2021 | 位置编码方案 |
-| 9 | GQA | 2023 | KV cache 优化 |
-| 10 | PaliGemma | 2024 | Pi0.5 的视觉语言 backbone |
+| #   | 论文                                              | 年份 | 和本 repo 的关系                        |
+| --- | ------------------------------------------------- | ---- | --------------------------------------- |
+| 1   | Attention Is All You Need                         | 2017 | 一切的基础                              |
+| 2   | Llama 2                                           | 2023 | RMSNorm + RoPE + GQA，现代 LLM 标准架构 |
+| 3   | Flow Matching for Generative Modeling             | 2023 | Pi0 / Gr00t 的 action 生成方法          |
+| 4   | Scalable Diffusion Models with Transformers (DiT) | 2023 | Gr00t head 的理论基础                   |
+| 5   | Pi0: A Vision-Language-Action Flow Model          | 2024 | Pi0.5 的前身，joint attention 设计      |
+| 6   | Pi0.5                                             | 2025 | 本 repo 主模型架构                      |
+| 7   | FlashAttention                                    | 2022 | 理解 attention 优化的基础               |
+| 8   | RoFormer (RoPE)                                   | 2021 | 位置编码方案                            |
+| 9   | GQA                                               | 2023 | KV cache 优化                           |
+| 10  | PaliGemma                                         | 2024 | Pi0.5 的视觉语言 backbone               |

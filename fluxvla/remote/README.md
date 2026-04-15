@@ -44,6 +44,7 @@
 ```
 
 **前提要求**：
+
 - Server 和 Client 在同一局域网内，能 TCP 互通（默认端口 5555）
 - Server 有 GPU，已安装 FluxVLA 全部依赖
 - Client 只需 `pip install zmq msgpack numpy opencv-python torch`（无需模型相关依赖）
@@ -86,15 +87,15 @@ Server is ready and listening on tcp://0.0.0.0:5555
 
 **Server 参数：**
 
-| 参数            | 默认值    | 说明                                                  |
-| --------------- | --------- | ----------------------------------------------------- |
-| `--config`      | (必填)    | mmengine config 文件路径                              |
-| `--ckpt-path`   | (必填)    | 模型 checkpoint 路径（同目录需有 `dataset_statistics.json`）|
-| `--host`        | `0.0.0.0` | 监听地址（`0.0.0.0` 监听所有网卡）                    |
-| `--port`        | `5555`    | 监听端口                                              |
-| `--device`      | `cuda:0`  | 推理设备                                              |
-| `--dtype`       | `bf16`    | 精度类型（bf16/fp16/fp32）                            |
-| `--dataset-key` | 自动检测  | 从哪个 config key 读 dataset（`inference` 或 `eval`） |
+| 参数            | 默认值    | 说明                                                         |
+| --------------- | --------- | ------------------------------------------------------------ |
+| `--config`      | (必填)    | mmengine config 文件路径                                     |
+| `--ckpt-path`   | (必填)    | 模型 checkpoint 路径（同目录需有 `dataset_statistics.json`） |
+| `--host`        | `0.0.0.0` | 监听地址（`0.0.0.0` 监听所有网卡）                           |
+| `--port`        | `5555`    | 监听端口                                                     |
+| `--device`      | `cuda:0`  | 推理设备                                                     |
+| `--dtype`       | `bf16`    | 精度类型（bf16/fp16/fp32）                                   |
+| `--dataset-key` | 自动检测  | 从哪个 config key 读 dataset（`inference` 或 `eval`）        |
 
 ### Step 2: 配置 Client（机器人端）
 
@@ -266,6 +267,7 @@ vla.close()
 ```
 
 **关键点**：
+
 - 图像直接传 camera 原始输出（`uint8`, BGR），server 负责 resize + normalize
 - `qpos` 传 `float32` numpy array，server 负责 state normalize
 - `task_description` 传字符串，server 负责 tokenize
@@ -274,18 +276,18 @@ vla.close()
 
 ## Client 端启动对比
 
-|                              | 本地推理 | offload（当前） |
-| ---------------------------- | -------- | --------------- |
-| 加载模型权重                 | Yes      | **No**          |
-| 加载 tokenizer               | Yes      | **No**          |
-| 加载 image processor         | Yes      | **No**          |
-| 构建 dataset pipeline        | Yes      | **No**          |
-| 加载 dataset_statistics.json | Yes      | **No**          |
-| Action 反归一化              | Client   | **Server**      |
-| 需要 `--ckpt-path`          | Yes      | **No**（仅 LIBERO eval 日志路径需要）|
-| 需要 GPU                    | Yes      | **No**          |
-| Client 依赖                 | 全部     | `zmq msgpack numpy opencv torch` |
-| 启动时间                     | ~60s     | **<5s**         |
+|                              | 本地推理 | offload（当前）                       |
+| ---------------------------- | -------- | ------------------------------------- |
+| 加载模型权重                 | Yes      | **No**                                |
+| 加载 tokenizer               | Yes      | **No**                                |
+| 加载 image processor         | Yes      | **No**                                |
+| 构建 dataset pipeline        | Yes      | **No**                                |
+| 加载 dataset_statistics.json | Yes      | **No**                                |
+| Action 反归一化              | Client   | **Server**                            |
+| 需要 `--ckpt-path`           | Yes      | **No**（仅 LIBERO eval 日志路径需要） |
+| 需要 GPU                     | Yes      | **No**                                |
+| Client 依赖                  | 全部     | `zmq msgpack numpy opencv torch`      |
+| 启动时间                     | ~60s     | **\<5s**                              |
 
 ## Profiling
 
@@ -336,16 +338,16 @@ CUDA_VISIBLE_DEVICES=0 torchrun --nnodes 1 --nproc_per_node 1 scripts/eval.py \
 
 实测结果（libero_10, 10 tasks x 1 trial, 251 steps）：
 
-| 阶段 | Client 端 | Server 端 |
-|------|-----------|-----------|
-| data_preprocess | 0.0ms | 20.1ms |
-| serialize | 1.3ms | — |
-| network roundtrip | 3.9ms | — |
-| model inference | — | 340.8ms |
-| deserialize | 0.9ms | — |
-| env_step | 234.5ms | — |
-| **total per step** | **619.6ms** | — |
-| payload | **40KB** | — |
+| 阶段               | Client 端   | Server 端 |
+| ------------------ | ----------- | --------- |
+| data_preprocess    | 0.0ms       | 20.1ms    |
+| serialize          | 1.3ms       | —         |
+| network roundtrip  | 3.9ms       | —         |
+| model inference    | —           | 340.8ms   |
+| deserialize        | 0.9ms       | —         |
+| env_step           | 234.5ms     | —         |
+| **total per step** | **619.6ms** | —         |
+| payload            | **40KB**    | —         |
 
 ## 注意事项
 

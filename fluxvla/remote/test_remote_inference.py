@@ -117,7 +117,7 @@ def test_end_to_end(port, dataset_cls, obs, action_shape, label):
             break
         time.sleep(0.1)
     else:
-        raise RuntimeError("Server failed to start within 5s")
+        raise RuntimeError('Server failed to start within 5s')
     try:
         actions = client.predict_action(**obs)
         assert actions.shape == torch.Size(action_shape), (

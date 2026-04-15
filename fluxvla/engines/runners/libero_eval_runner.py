@@ -22,7 +22,11 @@ from typing import Dict
 import torch
 import torch.distributed as dist
 import tqdm
+<<<<<<< HEAD
 from safetensors.torch import load_file
+=======
+from libero.libero import benchmark
+>>>>>>> 5644a29 (feat : zmq + msgpack testing connection)
 
 from fluxvla.engines.utils import initialize_overwatch
 from fluxvla.engines.utils.eval_utils import (get_libero_dummy_action,
@@ -30,7 +34,6 @@ from fluxvla.engines.utils.eval_utils import (get_libero_dummy_action,
                                               save_rollout_video)
 from fluxvla.engines.utils.name_map import str_to_dtype
 from fluxvla.engines.utils.torch_utils import set_seed_everywhere
-from libero.libero import benchmark
 from ..utils.root import RUNNERS
 
 overwatch = initialize_overwatch(__name__)
@@ -199,8 +202,10 @@ class LiberoEvalRunner:
             assert unnorm_key in self.vla.norm_stats, f'Action un-norm key {unnorm_key} not found in VLA `norm_stats`!'  # noqa: E501
 
         # ---- Profiling: global accumulators ----
-        _prof_keys = ['data_preprocess', 'model_inference',
-                      'action_postprocess', 'denormalize', 'env_step']
+        _prof_keys = [
+            'data_preprocess', 'model_inference', 'action_postprocess',
+            'denormalize', 'env_step'
+        ]
         # Remote inference sub-phase keys
         _remote_keys = ['serialize', 'network', 'server_infer', 'deserialize']
         _prof_global = {k: 0.0 for k in _prof_keys}
@@ -288,10 +293,9 @@ class LiberoEvalRunner:
                         batch = obs
                         if len(replay_images) == 0:
                             _first_img = next(
-                                (v for v in obs.values()
-                                 if hasattr(v, 'shape') and len(
-                                     getattr(v, 'shape', ())) == 3),
-                                None)
+                                (v
+                                 for v in obs.values() if hasattr(v, 'shape')
+                                 and len(getattr(v, 'shape', ())) == 3), None)
                             if _first_img is not None:
                                 replay_images.append(_first_img)
                     else:
@@ -312,7 +316,8 @@ class LiberoEvalRunner:
                     _prof_ep['model_inference'] += time.perf_counter() - _t0
 
                     # Collect remote inference sub-phases
-                    if self._use_offload and hasattr(self.vla, '_last_profile'):
+                    if self._use_offload and hasattr(self.vla,
+                                                     '_last_profile'):
                         _lp = self.vla._last_profile
                         _prof_ep['serialize'] += _lp.get('serialize_ms', 0.0)
                         _prof_ep['network'] += _lp.get('network_ms', 0.0)
@@ -352,10 +357,9 @@ class LiberoEvalRunner:
                             action_denormed.tolist())
                         if self._use_offload:
                             _first_img = next(
-                                (v for v in obs.values()
-                                 if hasattr(v, 'shape') and len(
-                                     getattr(v, 'shape', ())) == 3),
-                                None)
+                                (v
+                                 for v in obs.values() if hasattr(v, 'shape')
+                                 and len(getattr(v, 'shape', ())) == 3), None)
                             if _first_img is not None:
                                 replay_images.append(_first_img)
                         else:
@@ -383,14 +387,13 @@ class LiberoEvalRunner:
                         _msg += f'  {k}={_prof_ep[k]/n*1000:.1f}ms'
                     _msg += f'  total={_prof_ep["total"]/n*1000:.1f}ms'
                     if self._use_offload:
-                        _msg += (
-                            f'\n  [Remote detail] '
-                            f'serialize={_prof_ep["serialize"]/n:.1f}ms  '
-                            f'network={_prof_ep["network"]/n:.1f}ms  '
-                            f'server_infer='
-                            f'{_prof_ep["server_infer"]/n:.1f}ms  '
-                            f'deserialize='
-                            f'{_prof_ep["deserialize"]/n:.1f}ms')
+                        _msg += (f'\n  [Remote detail] '
+                                 f'serialize={_prof_ep["serialize"]/n:.1f}ms  '
+                                 f'network={_prof_ep["network"]/n:.1f}ms  '
+                                 f'server_infer='
+                                 f'{_prof_ep["server_infer"]/n:.1f}ms  '
+                                 f'deserialize='
+                                 f'{_prof_ep["deserialize"]/n:.1f}ms')
                     overwatch.info(_msg)
                     log_file.write(_msg + '\n')
                     # Accumulate to global
@@ -451,14 +454,13 @@ class LiberoEvalRunner:
                 _msg += f'  {k}={_prof_global[k]/n*1000:.1f}ms'
             _msg += f'  total={_prof_global["total"]/n*1000:.1f}ms'
             if self._use_offload:
-                _msg += (
-                    f'\n  [Remote detail] '
-                    f'serialize={_prof_global["serialize"]/n:.1f}ms  '
-                    f'network={_prof_global["network"]/n:.1f}ms  '
-                    f'server_infer='
-                    f'{_prof_global["server_infer"]/n:.1f}ms  '
-                    f'deserialize='
-                    f'{_prof_global["deserialize"]/n:.1f}ms')
+                _msg += (f'\n  [Remote detail] '
+                         f'serialize={_prof_global["serialize"]/n:.1f}ms  '
+                         f'network={_prof_global["network"]/n:.1f}ms  '
+                         f'server_infer='
+                         f'{_prof_global["server_infer"]/n:.1f}ms  '
+                         f'deserialize='
+                         f'{_prof_global["deserialize"]/n:.1f}ms')
             overwatch.info(_msg)
             log_file.write(_msg + '\n')
             log_file.flush()

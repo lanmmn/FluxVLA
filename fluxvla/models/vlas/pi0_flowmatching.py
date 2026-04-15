@@ -23,13 +23,10 @@ from torch.distributed.fsdp.wrap import _or_policy
 
 from fluxvla.engines import (VLAS, build_llm_backbone_from_cfg,
                              build_projector_from_cfg)
-from fluxvla.engines.utils.model_utils import (apply_rotary_pos_emb,
-                                               create_pi05_block_mask,
-                                               create_sinusoidal_pos_embedding,
-                                               eager_attention_forward,
-                                               flex_attention_forward,
-                                               gated_residual,
-                                               make_att_2d_masks, sample_beta)
+from fluxvla.engines.utils.model_utils import (
+    apply_rotary_pos_emb, create_pi05_block_mask,
+    create_sinusoidal_pos_embedding, eager_attention_forward,
+    flex_attention_forward, gated_residual, make_att_2d_masks, sample_beta)
 from fluxvla.engines.utils.overwatch import initialize_overwatch
 from .base_vla import BaseVLA
 
@@ -616,14 +613,14 @@ class PI0FlowMatching(BaseVLA):
             x_t = t[:, None, None] * noise + (1 - t[:, None, None]) * actions
 
         u_t = noise - actions
-        with record_function("embed_prefix"):
+        with record_function('embed_prefix'):
             prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
                 images=images,
                 lang_tokens=lang_tokens,
                 img_masks=img_masks,
                 lang_masks=lang_masks,
                 past_key_values=past_key_values)
-        with record_function("embed_suffix"):
+        with record_function('embed_suffix'):
             suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = (
                 self.embed_suffix(states, x_t, t))
         inputs_embeds = [prefix_embs, suffix_embs]
@@ -638,8 +635,7 @@ class PI0FlowMatching(BaseVLA):
                 att_masks, pad_masks, device=att_masks.device)
         else:
             attention_masks = make_att_2d_masks(pad_masks, att_masks)
-            att_2d_masks_4d = self._prepare_attention_masks_4d(
-                attention_masks)
+            att_2d_masks_4d = self._prepare_attention_masks_4d(attention_masks)
 
         suffix_out, _ = self.forward_model(
             inputs_embeds=inputs_embeds,

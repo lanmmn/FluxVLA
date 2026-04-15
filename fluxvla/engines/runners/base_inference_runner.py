@@ -107,8 +107,9 @@ class BaseInferenceRunner:
 
         # Initialize paths
         self.ckpt_path = ckpt_path
-        self._use_offload = (offload_inference is not None
-                            and offload_inference.get('enabled', False))
+        self._use_offload = (
+            offload_inference is not None
+            and offload_inference.get('enabled', False))
 
         if self._use_offload:
             # Remote mode: server handles denormalization and preprocessing
@@ -124,8 +125,7 @@ class BaseInferenceRunner:
             self.denormalize_action = build_transform_from_cfg(
                 denormalize_action)
             dataset['norm_stats'] = data_stat_path
-            dataset['model_path'] = os.path.dirname(
-                os.path.dirname(ckpt_path))
+            dataset['model_path'] = os.path.dirname(os.path.dirname(ckpt_path))
             self.dataset = build_dataset_from_cfg(dataset)
 
         if self._use_offload:

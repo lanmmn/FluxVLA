@@ -219,7 +219,9 @@ def flex_attention_forward(
         _flex_attention_compiled = torch.compile(flex_attention)
 
     attn_output = _flex_attention_compiled(
-        query, key, value,
+        query,
+        key,
+        value,
         block_mask=attention_mask,
         scale=scaling,
         enable_gqa=True,

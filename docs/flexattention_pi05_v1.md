@@ -59,7 +59,7 @@ Q ↓
 - prefix 内部 FULL（跳过 mask 判断）
 - 只有 suffix 边界 block 需要 apply mask_mod
 
----
+______________________________________________________________________
 
 ## 3. 改动清单
 
@@ -179,16 +179,16 @@ model = dict(
 
 ### 3.4 不需要改动的部分
 
-| 组件 | 原因 |
-|------|------|
-| `_forward_transformer_layers` | 通过 `self.attention_interface` 函数指针切换，零改动 |
-| `make_att_2d_masks` | 保留给 eager 后端使用 |
-| `_prepare_attention_masks_4d` | 同上 |
-| `PI05FlowMatching` 子类 | 不再 override forward，继承父类改动 |
-| `condition_gemma.py` | 独立 attention 路径 |
-| `embed_prefix` / `embed_suffix` | mask 值构建不变 |
+| 组件                            | 原因                                                 |
+| ------------------------------- | ---------------------------------------------------- |
+| `_forward_transformer_layers`   | 通过 `self.attention_interface` 函数指针切换，零改动 |
+| `make_att_2d_masks`             | 保留给 eager 后端使用                                |
+| `_prepare_attention_masks_4d`   | 同上                                                 |
+| `PI05FlowMatching` 子类         | 不再 override forward，继承父类改动                  |
+| `condition_gemma.py`            | 独立 attention 路径                                  |
+| `embed_prefix` / `embed_suffix` | mask 值构建不变                                      |
 
----
+______________________________________________________________________
 
 ## 4. 数据流对比
 
@@ -223,19 +223,19 @@ att_masks (B, 703)  ──→  cumsum  ──→  create_pi05_block_mask  ──
 
 显存开销：BlockMask 元数据 ≈ 几 KB（`ceil(703/128)² = 36` 个 block 的元数据）
 
----
+______________________________________________________________________
 
 ## 5. 预期收益
 
 ### 5.1 性能
 
-| 指标 | Eager | FlexAttention | 说明 |
-|------|-------|---------------|------|
-| 注意力显存 | O(N²) | O(N) | 不存储完整 703×703 矩阵 |
-| Mask 显存 | ~1.9 MB/样本 | ~KB | BlockMask 元数据 |
-| 计算量 | 100% blocks | ~80% blocks | ~20% EMPTY blocks 跳过 |
-| Kernel 效率 | PyTorch matmul × 3 | Fused Triton kernel | IO-aware tiling |
-| **预估加速** | **1x** | **10-30x** | attention 部分 |
+| 指标         | Eager              | FlexAttention       | 说明                    |
+| ------------ | ------------------ | ------------------- | ----------------------- |
+| 注意力显存   | O(N²)              | O(N)                | 不存储完整 703×703 矩阵 |
+| Mask 显存    | ~1.9 MB/样本       | ~KB                 | BlockMask 元数据        |
+| 计算量       | 100% blocks        | ~80% blocks         | ~20% EMPTY blocks 跳过  |
+| Kernel 效率  | PyTorch matmul × 3 | Fused Triton kernel | IO-aware tiling         |
+| **预估加速** | **1x**             | **10-30x**          | attention 部分          |
 
 ### 5.2 训练吞吐预估
 
@@ -247,17 +247,17 @@ attention 占整个 forward 的比例约 30-40%（其余是 SigLIP、FFN、embed
 
 即训练吞吐提升约 **40-50%**。
 
----
+______________________________________________________________________
 
 ## 6. 风险评估
 
-| 风险 | 概率 | 影响 | 应对 |
-|------|------|------|------|
-| compile 与 FSDP 冲突 | 低 | 只 compile 一个无状态函数，不涉及参数管理 | 回退到 eager |
-| compile 与 grad checkpoint 冲突 | 低 | recompute 时重新调用 compiled kernel，PyTorch 2.6 支持 | 回退到 eager |
-| 重编译 | **无** | seq_len=703 固定 | N/A |
-| head_dim=256 Triton kernel 效率 | 中 | FlexAttention 的 Triton kernel 需要足够 shared memory | H100 228KB 足够；A100 可能需调 block_size |
-| 数值差异 | 低 | FlexAttention 与 eager 的计算顺序不同，bf16 下可能有微小差异 | 验证 loss 曲线一致 |
+| 风险                            | 概率   | 影响                                                         | 应对                                      |
+| ------------------------------- | ------ | ------------------------------------------------------------ | ----------------------------------------- |
+| compile 与 FSDP 冲突            | 低     | 只 compile 一个无状态函数，不涉及参数管理                    | 回退到 eager                              |
+| compile 与 grad checkpoint 冲突 | 低     | recompute 时重新调用 compiled kernel，PyTorch 2.6 支持       | 回退到 eager                              |
+| 重编译                          | **无** | seq_len=703 固定                                             | N/A                                       |
+| head_dim=256 Triton kernel 效率 | 中     | FlexAttention 的 Triton kernel 需要足够 shared memory        | H100 228KB 足够；A100 可能需调 block_size |
+| 数值差异                        | 低     | FlexAttention 与 eager 的计算顺序不同，bf16 下可能有微小差异 | 验证 loss 曲线一致                        |
 
 ### 回退策略
 
@@ -267,7 +267,7 @@ attention_implementation='eager'   # 回退到原始实现
 attention_implementation='flex'    # FlexAttention
 ```
 
----
+______________________________________________________________________
 
 ## 7. 测试方案
 
@@ -326,14 +326,14 @@ for impl in ['eager', 'flex']:
     # 记录 GPU 显存峰值
 ```
 
----
+______________________________________________________________________
 
 ## 8. 改动量统计
 
-| 文件 | 改动 | 行数 |
-|------|------|------|
-| `fluxvla/engines/utils/model_utils.py` | 新增 `create_pi05_block_mask` + `flex_attention_forward` | ~50 行 |
-| `fluxvla/models/vlas/pi0_flowmatching.py` | 修改 `get_attention_interface` + `forward` mask 分支 | ~15 行 |
-| `configs/pi05/*.py` | 改 `attention_implementation` | 1 行 |
-| `test/test_ops/test_flashattn.py` | 新增测试 | ~60 行 |
-| **总计** | | **~126 行** |
+| 文件                                      | 改动                                                     | 行数        |
+| ----------------------------------------- | -------------------------------------------------------- | ----------- |
+| `fluxvla/engines/utils/model_utils.py`    | 新增 `create_pi05_block_mask` + `flex_attention_forward` | ~50 行      |
+| `fluxvla/models/vlas/pi0_flowmatching.py` | 修改 `get_attention_interface` + `forward` mask 分支     | ~15 行      |
+| `configs/pi05/*.py`                       | 改 `attention_implementation`                            | 1 行        |
+| `test/test_ops/test_flashattn.py`         | 新增测试                                                 | ~60 行      |
+| **总计**                                  |                                                          | **~126 行** |

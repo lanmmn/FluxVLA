@@ -9,7 +9,6 @@ Usage::
         --host 0.0.0.0 --port 5555
 """
 from __future__ import annotations
-
 import io
 import threading
 import time
@@ -36,8 +35,7 @@ class TensorSerializer:
         return buf.getvalue()
 
     @staticmethod
-    def deserialize_actions(data: bytes,
-                            device: str = "cpu") -> torch.Tensor:
+    def deserialize_actions(data: bytes, device: str = 'cpu') -> torch.Tensor:
         """Deserialize bytes back to an action tensor."""
         arr = np.load(io.BytesIO(data), allow_pickle=False)
         return torch.from_numpy(arr.copy()).to(device)
@@ -46,7 +44,9 @@ class TensorSerializer:
 class VLAInferPipeline:
     """Wraps a real VLA model for server-side tensor-batch inference."""
 
-    def __init__(self, vla_model, device: str = "cuda:0",
+    def __init__(self,
+                 vla_model,
+                 device: str = 'cuda:0',
                  mixed_precision_dtype=torch.bfloat16):
         self._vla = vla_model
         self._device = torch.device(device)
@@ -59,7 +59,7 @@ class VLAInferPipeline:
         for k, v in batch.items():
             if isinstance(v, torch.Tensor):
                 batch[k] = v.to(self._device)
-        with torch.autocast("cuda", dtype=self._dtype, enabled=True):
+        with torch.autocast('cuda', dtype=self._dtype, enabled=True):
             actions = self._vla.predict_action(**batch)
         return actions
 
@@ -79,8 +79,11 @@ class VLAPolicy(BasePolicy):
     - ``infer_time``: float, server-side inference time in seconds
     """
 
-    def __init__(self, pipeline: VLAInferPipeline, dataset=None,
-                 denormalize_action=None, task_suite_name: str = ""):
+    def __init__(self,
+                 pipeline: VLAInferPipeline,
+                 dataset=None,
+                 denormalize_action=None,
+                 task_suite_name: str = ''):
         super().__init__()
         self._pipeline = pipeline
         self._dataset = dataset
@@ -92,13 +95,12 @@ class VLAPolicy(BasePolicy):
         self._start_time = time.time()
 
     def _get_action(self, observation, options=None):
-        return {"error": "Use predict_action endpoint"}, {}
+        return {'error': 'Use predict_action endpoint'}, {}
 
     def reset(self, options=None):
-        return {"status": "ok"}
+        return {'status': 'ok'}
 
-    def predict_action(self, obs_data: bytes,
-                       unnorm_key: str = "") -> dict:
+    def predict_action(self, obs_data: bytes, unnorm_key: str = '') -> dict:
         """Receive raw observation, preprocess, run inference, return actions.
 
         Args:
@@ -118,7 +120,7 @@ class VLAPolicy(BasePolicy):
         else:
             batch = obs
         if unnorm_key:
-            batch["unnorm_key"] = unnorm_key
+            batch['unnorm_key'] = unnorm_key
         t_preprocess = time.perf_counter() - t1
 
         # --- Model inference ---
@@ -132,9 +134,10 @@ class VLAPolicy(BasePolicy):
             task_name = self._task_suite_name
             # 传整个 chunk 一次调用,denorm 内部用 numpy broadcast 处理
             # actions_np shape: (1, chunk, dim) 或 (1, dim)
-            d = self._denormalize_action(dict(
-                action=actions_np[0],          # (chunk, dim) 或 (dim,)
-                task_suite_name=task_name))
+            d = self._denormalize_action(
+                dict(
+                    action=actions_np[0],  # (chunk, dim) 或 (dim,)
+                    task_suite_name=task_name))
             actions = torch.from_numpy(d[None].astype(np.float32))
 
         # --- Serialize actions ---
@@ -149,18 +152,19 @@ class VLAPolicy(BasePolicy):
             should_print = (n % 50 == 0)
             avg = self._total_infer_time / n if should_print else 0.0
 
-        if should_print:   # I/O 移到锁外,避免阻塞其他线程
-            print(f"[ZMQ VLAServer] req={n}  "
-                  f"deserialize={t_deserialize*1000:.1f}ms  "
-                  f"preprocess={t_preprocess*1000:.1f}ms  "
-                  f"infer={infer_time*1000:.1f}ms  "
-                  f"serialize={t_serialize*1000:.1f}ms  "
-                  f"avg_infer={avg*1000:.1f}ms",
-                  flush=True)
+        if should_print:  # I/O 移到锁外,避免阻塞其他线程
+            print(
+                f'[ZMQ VLAServer] req={n}  '
+                f'deserialize={t_deserialize*1000:.1f}ms  '
+                f'preprocess={t_preprocess*1000:.1f}ms  '
+                f'infer={infer_time*1000:.1f}ms  '
+                f'serialize={t_serialize*1000:.1f}ms  '
+                f'avg_infer={avg*1000:.1f}ms',
+                flush=True)
 
         return {
-            "action_data": action_bytes,
-            "infer_time": infer_time + t_preprocess,
+            'action_data': action_bytes,
+            'infer_time': infer_time + t_preprocess,
         }
 
     def get_status(self) -> dict:
@@ -169,19 +173,19 @@ class VLAPolicy(BasePolicy):
             total = self._total_requests
             avg = (self._total_infer_time / total) if total > 0 else 0.0
         return {
-            "status": "ready",
-            "uptime_s": time.time() - self._start_time,
-            "total_requests": total,
-            "avg_infer_time": avg,
+            'status': 'ready',
+            'uptime_s': time.time() - self._start_time,
+            'total_requests': total,
+            'avg_infer_time': avg,
         }
 
 
 def create_vla_server(pipeline: VLAInferPipeline,
-                      host: str = "*",
+                      host: str = '*',
                       port: int = 5555,
                       dataset=None,
                       denormalize_action=None,
-                      task_suite_name: str = "") -> PolicyServer:
+                      task_suite_name: str = '') -> PolicyServer:
     """Create a ZMQ PolicyServer serving a VLA model.
 
     Args:
@@ -195,12 +199,14 @@ def create_vla_server(pipeline: VLAInferPipeline,
             server-side action denormalization.
         task_suite_name: Task suite name for denormalization lookup.
     """
-    policy = VLAPolicy(pipeline, dataset=dataset,
-                       denormalize_action=denormalize_action,
-                       task_suite_name=task_suite_name)
+    policy = VLAPolicy(
+        pipeline,
+        dataset=dataset,
+        denormalize_action=denormalize_action,
+        task_suite_name=task_suite_name)
     server = PolicyServer(policy, host=host, port=port)
     # Register VLA-specific endpoints
-    server.register_endpoint("predict_action", policy.predict_action)
-    server.register_endpoint("get_status", policy.get_status,
-                             requires_input=False)
+    server.register_endpoint('predict_action', policy.predict_action)
+    server.register_endpoint(
+        'get_status', policy.get_status, requires_input=False)
     return server

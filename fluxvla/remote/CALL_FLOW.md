@@ -141,13 +141,13 @@ RemoteVLAZmq                              VLAPolicy
 
 ## 各文件职责速查
 
-| 文件 | 角色 | 核心类/函数 |
-|------|------|------------|
-| `policy.py` | 抽象接口 | `BasePolicy` (ABC) |
-| `server_client.py` | 通信框架 | `MsgSerializer`, `ObsSerializer`, `PolicyServer`, `PolicyClient` |
-| `vla_server.py` | Server 推理 | `VLAInferPipeline`, `VLAPolicy`, `TensorSerializer`, `create_vla_server()` |
-| `remote_vla.py` | Client 代理 | `RemoteVLAZmq` |
-| `__init__.py` | 包导出 | 汇总导出所有公开类 |
+| 文件               | 角色        | 核心类/函数                                                                |
+| ------------------ | ----------- | -------------------------------------------------------------------------- |
+| `policy.py`        | 抽象接口    | `BasePolicy` (ABC)                                                         |
+| `server_client.py` | 通信框架    | `MsgSerializer`, `ObsSerializer`, `PolicyServer`, `PolicyClient`           |
+| `vla_server.py`    | Server 推理 | `VLAInferPipeline`, `VLAPolicy`, `TensorSerializer`, `create_vla_server()` |
+| `remote_vla.py`    | Client 代理 | `RemoteVLAZmq`                                                             |
+| `__init__.py`      | 包导出      | 汇总导出所有公开类                                                         |
 
 ## 序列化协议栈
 

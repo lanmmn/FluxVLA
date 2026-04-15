@@ -30,6 +30,7 @@ fluxvla/remote/
 ## 通信协议
 
 ### 传输层
+
 - **Socket 类型**：ZMQ REQ/REP（同步请求-响应）
 - **传输协议**：TCP (`tcp://host:port`)
 - **消息序列化**：msgpack（外层消息帧）+ torch.save/load（tensor payload）
@@ -78,6 +79,7 @@ class TensorSerializer:
 ```
 
 **安全保障**：
+
 - `torch.load(..., weights_only=True)` 禁止任意 pickle 反序列化
 - 所有 tensor 先移到 CPU 再序列化，避免跨设备问题
 
@@ -112,6 +114,7 @@ class VLAPolicy(BasePolicy):
 ```
 
 **predict_action 流程**：
+
 1. 反序列化 raw obs（JPEG 解码）
 2. 预处理（dataset transforms: image resize/normalize, tokenize, state normalize）
 3. 模型推理（GPU）
@@ -120,12 +123,12 @@ class VLAPolicy(BasePolicy):
 
 **注册的端点**：
 
-| Endpoint | 功能 | 需要输入 |
-|----------|------|----------|
-| `predict_action` | raw obs → 反归一化后的 action | Yes |
-| `get_status` | 服务端状态查询 | No |
-| `ping` | 健康检查 | No |
-| `kill` | 远程关闭服务 | No |
+| Endpoint         | 功能                          | 需要输入 |
+| ---------------- | ----------------------------- | -------- |
+| `predict_action` | raw obs → 反归一化后的 action | Yes      |
+| `get_status`     | 服务端状态查询                | No       |
+| `ping`           | 健康检查                      | No       |
+| `kill`           | 远程关闭服务                  | No       |
 
 **性能统计**：每 50 次请求打印一次 deserialize/preprocess/infer/serialize 耗时。
 
@@ -204,18 +207,18 @@ obs = env.step(action)                       # LIBERO 环境产生观测
 
 **Server 内部 tensor（预处理后）**：
 
-| 字段 | Shape | Dtype | 说明 |
-|------|-------|-------|------|
-| `images` | (1, C, H, W) | float32 | C = num_views * 3 |
-| `img_masks` | (1, num_views) | bool | 视角掩码 |
-| `lang_tokens` | (1, seq_len) | int64 | tokenized 任务描述 |
-| `lang_masks` | (1, seq_len) | bool | token 掩码 |
-| `states` | (1, state_dim) | float32 | 本体感知状态 |
+| 字段          | Shape          | Dtype   | 说明               |
+| ------------- | -------------- | ------- | ------------------ |
+| `images`      | (1, C, H, W)   | float32 | C = num_views * 3  |
+| `img_masks`   | (1, num_views) | bool    | 视角掩码           |
+| `lang_tokens` | (1, seq_len)   | int64   | tokenized 任务描述 |
+| `lang_masks`  | (1, seq_len)   | bool    | token 掩码         |
+| `states`      | (1, state_dim) | float32 | 本体感知状态       |
 
 **返回给 client 的 action**：
 
-| 字段 | Shape | Dtype | 说明 |
-|------|-------|-------|------|
+| 字段               | Shape                           | Dtype   | 说明                             |
+| ------------------ | ------------------------------- | ------- | -------------------------------- |
 | `actions` (output) | (1, n_action_steps, action_dim) | float32 | 反归一化后的动作序列，可直接执行 |
 
 ## Config 集成方式
@@ -266,6 +269,7 @@ server = create_vla_server(
 ### 客户端（RemoteVLAZmq）
 
 每 50 次调用输出：
+
 ```
 [RemoteVLAZmq profiling] calls=50  avg_total=45.2ms  avg_serialize=2.1ms
   avg_zmq_roundtrip=15.3ms  avg_server_infer=25.8ms  avg_deserialize=1.2ms
@@ -275,6 +279,7 @@ server = create_vla_server(
 ### 服务端（VLAPolicy）
 
 每 50 次请求输出：
+
 ```
 [ZMQ VLAServer] req=50  deserialize=1.8ms  infer=23.5ms  serialize=0.9ms
   avg_infer=24.1ms
@@ -282,11 +287,11 @@ server = create_vla_server(
 
 ### 典型延迟分布
 
-| 阶段 | 耗时 | 占比 |
-|------|------|------|
-| 客户端序列化 | ~2ms | 4% |
-| 网络传输（局域网） | ~15ms | 33% |
-| 服务端推理 | ~25ms | 56% |
-| 客户端反序列化 | ~1ms | 2% |
-| 其他开销 | ~2ms | 5% |
-| **总计** | **~45ms** | 100% |
+| 阶段               | 耗时      | 占比 |
+| ------------------ | --------- | ---- |
+| 客户端序列化       | ~2ms      | 4%   |
+| 网络传输（局域网） | ~15ms     | 33%  |
+| 服务端推理         | ~25ms     | 56%  |
+| 客户端反序列化     | ~1ms      | 2%   |
+| 其他开销           | ~2ms      | 5%   |
+| **总计**           | **~45ms** | 100% |

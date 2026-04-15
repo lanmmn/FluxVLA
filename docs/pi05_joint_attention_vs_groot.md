@@ -4,12 +4,12 @@
 
 本文档对比分析 Pi0.5 和 Gr00t 两种 Vision-Language-Action (VLA) 模型中 attention 机制的设计差异。两者都基于 Flow Matching 生成 action trajectory，但在视觉语言信息与 action 的融合方式上采用了截然不同的策略。
 
-| 模型 | 论文 | 核心代码 |
-|------|------|----------|
-| Pi0.5 | [arXiv:2504.16054](https://arxiv.org/abs/2504.16054) | `fluxvla/models/vlas/pi05_flowmatching.py` |
-| Gr00t | GR00T-N1.5 | `fluxvla/models/heads/flow_matching_head.py` + `fluxvla/models/blocks/cross_attention_dit.py` |
+| 模型  | 论文                                                 | 核心代码                                                                                      |
+| ----- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Pi0.5 | [arXiv:2504.16054](https://arxiv.org/abs/2504.16054) | `fluxvla/models/vlas/pi05_flowmatching.py`                                                    |
+| Gr00t | GR00T-N1.5                                           | `fluxvla/models/heads/flow_matching_head.py` + `fluxvla/models/blocks/cross_attention_dit.py` |
 
----
+______________________________________________________________________
 
 ## 2. Pi0.5 Joint Attention 详解
 
@@ -60,13 +60,13 @@ att_2d_masks = cumsum[:, None, :] <= cumsum[:, :, None]
 
 #### Step 3: 可见性矩阵
 
-| Q (行) \ KV (列) | img (seg=0) | lang (seg=0) | state (seg=1) | act₁ (seg=2) | act₂..₁₀ (seg=2) |
-|:-----------------:|:-----------:|:------------:|:-------------:|:------------:|:-----------------:|
-| **img (seg=0)**       | Bi | Bi | x | x | x |
-| **lang (seg=0)**      | Bi | Bi | x | x | x |
-| **state (seg=1)**     | Y  | Y  | Y | x | x |
-| **act₁ (seg=2)**      | Y  | Y  | Y | Y | x |
-| **act₂..₁₀ (seg=2)**  | Y  | Y  | Y | Y | Bi |
+|  Q (行) \\ KV (列)   | img (seg=0) | lang (seg=0) | state (seg=1) | act₁ (seg=2) | act₂..₁₀ (seg=2) |
+| :------------------: | :---------: | :----------: | :-----------: | :----------: | :--------------: |
+|   **img (seg=0)**    |     Bi      |      Bi      |       x       |      x       |        x         |
+|   **lang (seg=0)**   |     Bi      |      Bi      |       x       |      x       |        x         |
+|  **state (seg=1)**   |      Y      |      Y       |       Y       |      x       |        x         |
+|   **act₁ (seg=2)**   |      Y      |      Y       |       Y       |      Y       |        x         |
+| **act₂..₁₀ (seg=2)** |      Y      |      Y       |       Y       |      Y       |        Bi        |
 
 - **Bi** = 双向可见; **Y** = 单向可见 (Q 可看 KV); **x** = 不可见
 - Prefix 内部：完全双向
@@ -127,7 +127,7 @@ time_emb = SiLU(time_mlp_out(time_emb))
 3. action_out_proj(x_t) → predicted actions
 ```
 
----
+______________________________________________________________________
 
 ## 3. Gr00t Cross-Attention DiT 详解
 
@@ -232,26 +232,26 @@ State encoder、action encoder、action decoder 都是 category-specific 的。
 5. action_decoder(x_t) → predicted actions
 ```
 
----
+______________________________________________________________________
 
 ## 4. 核心区别对比
 
-| 维度 | Pi0.5 (Joint Attention) | Gr00t (Cross-Attention DiT) |
-|:----:|:-----------------------:|:---------------------------:|
-| **架构范式** | 所有 token 在同一 transformer 中做 joint attention | VLM 提取特征 → 独立 DiT 做 denoising |
-| **VL 与 Action 交互方式** | 共享同一个 attention 矩阵，mask 控制可见性 | 两个独立序列，通过 cross-attention 桥接 |
-| **参数结构** | prefix 用 Gemma backbone，suffix 用 Gemma expert，层级共享 attention | VLM 和 DiT 参数完全独立 |
-| **VL 特征是否在 denoising 中更新** | **是** — prefix 在每层都参与计算并更新 | **否** — VL features 只在 backbone 中计算一次 |
-| **Attention 复杂度** | O((prefix+suffix)²) = O(703²) | O(action × VL) cross + O(action²) self |
-| **时间步注入** | AdaRMS Norm（仅 suffix 侧 LayerNorm） | AdaLN（条件化 DiT 每一层 LayerNorm） |
-| **时间步粒度** | 标量 (B,)，所有 action 共享 | 可支持 per-position (B, T) |
-| **Denoising 步数** | 10 步 | 4 步 |
-| **多 Embodiment** | 不支持（单一 embodiment 设计） | 支持（CategorySpecific 权重切换） |
-| **预训练基底** | PaliGemma (SigLIP + Gemma 2B) | Eagle 3B VLM |
-| **推理时 VL 复用** | KV Cache 机制 | 特征提取一次后重复使用 |
-| **Future Tokens** | 无 | 32 个可学习 token 作为"工作区" |
+|                维度                |                       Pi0.5 (Joint Attention)                        |          Gr00t (Cross-Attention DiT)          |
+| :--------------------------------: | :------------------------------------------------------------------: | :-------------------------------------------: |
+|            **架构范式**            |          所有 token 在同一 transformer 中做 joint attention          |     VLM 提取特征 → 独立 DiT 做 denoising      |
+|     **VL 与 Action 交互方式**      |              共享同一个 attention 矩阵，mask 控制可见性              |    两个独立序列，通过 cross-attention 桥接    |
+|            **参数结构**            | prefix 用 Gemma backbone，suffix 用 Gemma expert，层级共享 attention |            VLM 和 DiT 参数完全独立            |
+| **VL 特征是否在 denoising 中更新** |                **是** — prefix 在每层都参与计算并更新                | **否** — VL features 只在 backbone 中计算一次 |
+|        **Attention 复杂度**        |                    O((prefix+suffix)²) = O(703²)                     |    O(action × VL) cross + O(action²) self     |
+|           **时间步注入**           |                AdaRMS Norm（仅 suffix 侧 LayerNorm）                 |     AdaLN（条件化 DiT 每一层 LayerNorm）      |
+|           **时间步粒度**           |                     标量 (B,)，所有 action 共享                      |          可支持 per-position (B, T)           |
+|         **Denoising 步数**         |                                10 步                                 |                     4 步                      |
+|         **多 Embodiment**          |                    不支持（单一 embodiment 设计）                    |       支持（CategorySpecific 权重切换）       |
+|           **预训练基底**           |                    PaliGemma (SigLIP + Gemma 2B)                     |                 Eagle 3B VLM                  |
+|         **推理时 VL 复用**         |                            KV Cache 机制                             |            特征提取一次后重复使用             |
+|         **Future Tokens**          |                                  无                                  |        32 个可学习 token 作为"工作区"         |
 
----
+______________________________________________________________________
 
 ## 5. 设计哲学差异
 
@@ -280,7 +280,7 @@ Pi0.5 的 cumsum mask 用一行代码 `cumsum[:, None, :] <= cumsum[:, :, None]`
 - 天然支持 FlexAttention 的 `mask_mod` 接口（参见 `docs/flexattention_pi05_v1.md`）
 - 同一个 mask 格式可以适配 eager / SDPA / FlexAttention 等多种后端
 
----
+______________________________________________________________________
 
 ## 6. 数据流对比图
 
@@ -391,17 +391,17 @@ ActionEncoder ──────────────────────
       CategorySpecificMLP → predicted velocity (B, 10, 32) → denorm → (B, 10, 7)
 ```
 
----
+______________________________________________________________________
 
 ## 7. 相关文件索引
 
-| 文件 | 说明 |
-|------|------|
-| `fluxvla/models/vlas/pi0_flowmatching.py` | Pi0 基类，joint attention 核心实现 |
-| `fluxvla/models/vlas/pi05_flowmatching.py` | Pi0.5 子类，override embed_suffix |
-| `fluxvla/engines/utils/model_utils.py` | `make_att_2d_masks`、`eager_attention_forward` |
-| `fluxvla/models/heads/flow_matching_head.py` | Gr00t FlowMatchingHead |
-| `fluxvla/models/blocks/cross_attention_dit.py` | DiT、BasicTransformerBlock、AdaLN |
-| `docs/flexattention_pi05_v1.md` | Pi0.5 FlexAttention 加速方案 |
-| `configs/pi05/` | Pi0.5 训练配置 |
-| `configs/gr00t/` | Gr00t 训练配置 |
+| 文件                                           | 说明                                           |
+| ---------------------------------------------- | ---------------------------------------------- |
+| `fluxvla/models/vlas/pi0_flowmatching.py`      | Pi0 基类，joint attention 核心实现             |
+| `fluxvla/models/vlas/pi05_flowmatching.py`     | Pi0.5 子类，override embed_suffix              |
+| `fluxvla/engines/utils/model_utils.py`         | `make_att_2d_masks`、`eager_attention_forward` |
+| `fluxvla/models/heads/flow_matching_head.py`   | Gr00t FlowMatchingHead                         |
+| `fluxvla/models/blocks/cross_attention_dit.py` | DiT、BasicTransformerBlock、AdaLN              |
+| `docs/flexattention_pi05_v1.md`                | Pi0.5 FlexAttention 加速方案                   |
+| `configs/pi05/`                                | Pi0.5 训练配置                                 |
+| `configs/gr00t/`                               | Gr00t 训练配置                                 |
