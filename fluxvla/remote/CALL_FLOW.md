@@ -13,10 +13,10 @@ remote_vla.py       <- Client 端代理 (RemoteVLAZmq)
 
 ## 1. Server 启动流程
 
-入口: `zmq_msgpack/serve_vla_zmq.py -> main()`
+入口: `fluxvla/remote/serve.py -> main()` (或 `python -m fluxvla.remote.serve`)
 
 ```
-serve_vla_zmq.py main()
+serve.py main()
 |
 |- 1. Config.fromfile(args.config)                    # 加载 mmengine config
 |- 2. build_vla_from_cfg(cfg.model)                   # 构建 VLA 模型 (PI05FlowMatching)

@@ -82,59 +82,54 @@ class LiberoEvalRunner:
                  num_trials_per_task: int = 50,
                  num_steps_wait: int = 10,
                  mixed_precision_dtype: str = 'bf16',
-                 enable_mixed_precision_training: bool = True,
-                 offload_inference: Dict = None):
+                 enable_mixed_precision_training: bool = True):
         from fluxvla.engines import (build_dataset_from_cfg,
                                      build_transform_from_cfg,
                                      build_vla_from_cfg)
         self.device_id = overwatch.local_rank()
 
-        self.vla = build_vla_from_cfg(cfg.model).eval()
-        # Load checkpoint weights if ckpt_path is provided
+        if hasattr(cfg, 'inference_model'):
+            self.vla = build_vla_from_cfg(cfg.inference_model).eval()
+        else:
+            self.vla = build_vla_from_cfg(cfg.model).eval()
         if ckpt_path is not None:
             assert Path.exists(Path(ckpt_path)), \
                 f'Checkpoint path {ckpt_path} does not exist!'
-
-            if ckpt_path.endswith('.safetensors'):
-                state_dict = load_file(ckpt_path, device='cpu')
+            checkpoint = torch.load(ckpt_path, map_location='cpu')
+            if isinstance(checkpoint, dict) and 'model' in checkpoint:
+                state_dict = checkpoint['model']
             else:
-                checkpoint = torch.load(ckpt_path, map_location='cpu')
-                if isinstance(checkpoint, dict) and 'model' in checkpoint:
-                    state_dict = checkpoint['model']
-                else:
-                    state_dict = checkpoint
+                state_dict = checkpoint
             self.vla.load_state_dict(state_dict, strict=True)
+
         self.cfg = cfg
         self.seed = seed
         self.ckpt_path = ckpt_path
 
-        if self._use_offload:
-            # Remote mode: server handles denormalization and preprocessing
-            self.dataset = None
-            self.denormalize_action = None
-        else:
-            data_stat_path = os.path.join(
-                Path(self.ckpt_path).resolve().parent.parent,
-                'dataset_statistics.json')  # noqa: E501
-            assert os.path.exists(data_stat_path), \
-                f'Dataset statistics file not found at {data_stat_path}!'
-            denormalize_action['norm_stats'] = data_stat_path
-            self.denormalize_action = build_transform_from_cfg(
-                denormalize_action)
-            dataset['task_suite_name'] = task_suite_name
-            dataset['norm_stats'] = data_stat_path
-            self.dataset = build_dataset_from_cfg(dataset)
+        data_stat_path = os.path.join(
+            Path(self.ckpt_path).resolve().parent.parent,
+            'dataset_statistics.json')
+        assert os.path.exists(data_stat_path), \
+            f'Dataset statistics file not found at {data_stat_path}!'
+        denormalize_action['norm_stats'] = data_stat_path
+        self.denormalize_action = build_transform_from_cfg(
+            denormalize_action)
+        dataset['task_suite_name'] = task_suite_name
+        dataset['norm_stats'] = data_stat_path
+        self.dataset = build_dataset_from_cfg(dataset)
 
-            if os.path.isfile(data_stat_path):
-                with open(data_stat_path, 'r') as f:
-                    norm_stats = json.load(f)
-                self.vla.norm_stats = norm_stats
-            else:
-                overwatch.warning(
-                    'WARNING: No local dataset_statistics.json file found for current checkpoint.\n'  # noqa: E501
-                    'You can ignore this if you are loading the base VLA (i.e. not fine-tuned) checkpoint.'  # noqa: E501
-                    'Otherwise, you may run into errors when trying to call `predict_action()` due to an absent `unnorm_key`.'  # noqa: E501
-                )
+        if os.path.isfile(data_stat_path):
+            with open(data_stat_path, 'r') as f:
+                norm_stats = json.load(f)
+            self.vla.norm_stats = norm_stats
+        else:
+            overwatch.warning(
+                'WARNING: No local dataset_statistics.json file found '
+                'for current checkpoint.\n'
+                'You can ignore this if you are loading the base VLA '
+                '(i.e. not fine-tuned) checkpoint. '
+                'Otherwise, you may run into errors when trying to call '
+                '`predict_action()` due to an absent `unnorm_key`.')
 
         self.eval_chunk_size = eval_chunk_size
         self.model_family = model_family
@@ -155,8 +150,7 @@ class LiberoEvalRunner:
         self.vla.freeze_llm_backbone = True
         self.vla.freeze_projector = True
         self.vla.freeze_vlm_backbone = True
-        if not self._use_offload:
-            self.vla.cuda(self.device_id)
+        self.vla.cuda(self.device_id)
 
     def run(self):
         """Run the evaluation process."""
@@ -206,12 +200,8 @@ class LiberoEvalRunner:
             'data_preprocess', 'model_inference', 'action_postprocess',
             'denormalize', 'env_step'
         ]
-        # Remote inference sub-phase keys
-        _remote_keys = ['serialize', 'network', 'server_infer', 'deserialize']
         _prof_global = {k: 0.0 for k in _prof_keys}
         _prof_global['total'] = 0.0
-        for rk in _remote_keys:
-            _prof_global[rk] = 0.0
         _prof_global_steps = 0
 
         for id in range(num_local_episodes):
@@ -268,8 +258,6 @@ class LiberoEvalRunner:
                 # ---- Profiling: per-episode accumulators ----
                 _prof_ep = {k: 0.0 for k in _prof_keys}
                 _prof_ep['total'] = 0.0
-                for rk in _remote_keys:
-                    _prof_ep[rk] = 0.0
                 _prof_ep_steps = 0
 
                 while t < max_steps + self.num_steps_wait:
@@ -287,22 +275,10 @@ class LiberoEvalRunner:
                     # Phase 1: data preprocessing
                     _t0 = time.perf_counter()
                     obs['task_description'] = task_description
-                    if self._use_offload:
-                        # Remote: send raw obs, server does preprocessing
-                        obs['unnorm_key'] = unnorm_key
-                        batch = obs
-                        if len(replay_images) == 0:
-                            _first_img = next(
-                                (v
-                                 for v in obs.values() if hasattr(v, 'shape')
-                                 and len(getattr(v, 'shape', ())) == 3), None)
-                            if _first_img is not None:
-                                replay_images.append(_first_img)
-                    else:
-                        batch, replay_img = self.dataset(obs)
-                        batch['unnorm_key'] = unnorm_key
-                        if len(replay_images) == 0:
-                            replay_images.append(replay_img)
+                    batch, replay_img = self.dataset(obs)
+                    batch['unnorm_key'] = unnorm_key
+                    if len(replay_images) == 0:
+                        replay_images.append(replay_img)
                     _prof_ep['data_preprocess'] += time.perf_counter() - _t0
 
                     # Phase 2: model inference
@@ -314,17 +290,6 @@ class LiberoEvalRunner:
                         with torch.no_grad():
                             actions = self.vla.predict_action(**batch)
                     _prof_ep['model_inference'] += time.perf_counter() - _t0
-
-                    # Collect remote inference sub-phases
-                    if self._use_offload and hasattr(self.vla,
-                                                     '_last_profile'):
-                        _lp = self.vla._last_profile
-                        _prof_ep['serialize'] += _lp.get('serialize_ms', 0.0)
-                        _prof_ep['network'] += _lp.get('network_ms', 0.0)
-                        _prof_ep['server_infer'] += _lp.get(
-                            'server_infer_ms', 0.0)
-                        _prof_ep['deserialize'] += _lp.get(
-                            'deserialize_ms', 0.0)
 
                     # Phase 3: action postprocess
                     _t0 = time.perf_counter()
@@ -340,32 +305,20 @@ class LiberoEvalRunner:
                     for action in actions:
                         # Phase 4: denormalize
                         _t0 = time.perf_counter()
-                        if self._use_offload:
-                            # Server already denormalized
-                            action_denormed = action
-                        else:
-                            inputs = dict(
-                                action=action,
-                                task_suite_name=self.task_suite_name,
-                            )
-                            action_denormed = self.denormalize_action(inputs)
+                        inputs = dict(
+                            action=action,
+                            task_suite_name=self.task_suite_name,
+                        )
+                        action_denormed = self.denormalize_action(inputs)
                         _prof_ep['denormalize'] += time.perf_counter() - _t0
 
                         # Phase 5: env step
                         _t0 = time.perf_counter()
                         obs, reward, done, info = env.step(
                             action_denormed.tolist())
-                        if self._use_offload:
-                            _first_img = next(
-                                (v
-                                 for v in obs.values() if hasattr(v, 'shape')
-                                 and len(getattr(v, 'shape', ())) == 3), None)
-                            if _first_img is not None:
-                                replay_images.append(_first_img)
-                        else:
-                            obs['task_description'] = task_description
-                            batch, replay_img = self.dataset(obs)
-                            replay_images.append(replay_img)
+                        obs['task_description'] = task_description
+                        batch, replay_img = self.dataset(obs)
+                        replay_images.append(replay_img)
                         _prof_ep['env_step'] += time.perf_counter() - _t0
 
                         if done:
@@ -386,23 +339,12 @@ class LiberoEvalRunner:
                     for k in _prof_keys:
                         _msg += f'  {k}={_prof_ep[k]/n*1000:.1f}ms'
                     _msg += f'  total={_prof_ep["total"]/n*1000:.1f}ms'
-                    if self._use_offload:
-                        _msg += (f'\n  [Remote detail] '
-                                 f'serialize={_prof_ep["serialize"]/n:.1f}ms  '
-                                 f'network={_prof_ep["network"]/n:.1f}ms  '
-                                 f'server_infer='
-                                 f'{_prof_ep["server_infer"]/n:.1f}ms  '
-                                 f'deserialize='
-                                 f'{_prof_ep["deserialize"]/n:.1f}ms')
                     overwatch.info(_msg)
                     log_file.write(_msg + '\n')
                     # Accumulate to global
                     for k in _prof_keys:
                         _prof_global[k] += _prof_ep[k]
                     _prof_global['total'] += _prof_ep['total']
-                    if self._use_offload:
-                        for rk in _remote_keys:
-                            _prof_global[rk] += _prof_ep[rk]
                     _prof_global_steps += _prof_ep_steps
 
                 total_episodes += 1
@@ -453,14 +395,6 @@ class LiberoEvalRunner:
             for k in _prof_keys:
                 _msg += f'  {k}={_prof_global[k]/n*1000:.1f}ms'
             _msg += f'  total={_prof_global["total"]/n*1000:.1f}ms'
-            if self._use_offload:
-                _msg += (f'\n  [Remote detail] '
-                         f'serialize={_prof_global["serialize"]/n:.1f}ms  '
-                         f'network={_prof_global["network"]/n:.1f}ms  '
-                         f'server_infer='
-                         f'{_prof_global["server_infer"]/n:.1f}ms  '
-                         f'deserialize='
-                         f'{_prof_global["deserialize"]/n:.1f}ms')
             overwatch.info(_msg)
             log_file.write(_msg + '\n')
             log_file.flush()

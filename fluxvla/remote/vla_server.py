@@ -3,7 +3,7 @@ serves it via ZMQ REP socket with torch tensor batch serialization.
 
 Usage::
 
-    python zmq_msgpack/serve_vla_zmq.py \
+    python -m fluxvla.remote.serve \
         --config configs/pi05/pi05_paligemma_libero_10_full_finetune.py \
         --ckpt-path /path/to/checkpoint.pt \
         --host 0.0.0.0 --port 5555
@@ -100,16 +100,24 @@ class VLAPolicy(BasePolicy):
     def reset(self, options=None):
         return {'status': 'ok'}
 
-    def predict_action(self, obs_data: bytes, unnorm_key: str = '') -> dict:
+    def predict_action(self, obs_data: bytes = None,
+                        unnorm_key: str = '',
+                        _obs_dict: dict = None,
+                        _wire_format: int = 0) -> dict:
         """Receive raw observation, preprocess, run inference, return actions.
 
         Args:
-            obs_data: Serialized raw observation (JPEG images + msgpack).
+            obs_data: Serialized raw observation (msgpack path).
             unnorm_key: Optional key for action denormalization.
+            _obs_dict: Pre-decoded observation dict (protobuf path).
+            _wire_format: Wire format tag (internal, set by PolicyServer).
         """
         # --- Deserialize raw obs ---
         t0 = time.perf_counter()
-        obs = ObsSerializer.from_bytes(obs_data)
+        if _obs_dict is not None:
+            obs = _obs_dict
+        else:
+            obs = ObsSerializer.from_bytes(obs_data)
         t_deserialize = time.perf_counter() - t0
 
         # --- Preprocess (dataset transforms) ---

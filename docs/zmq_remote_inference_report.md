@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-基于 `zmq_msgpack` 现有的 ZMQ REQ/REP + msgpack 通信框架，实现了一套与 gRPC 方案功能对等的 VLA 远程推理模块。用户可以在 config 中通过 `backend='zmq'` 切换到 ZMQ 后端，eval 循环代码无需任何修改。
+基于 ZMQ REQ/REP + msgpack 通信框架实现的 VLA 远程推理模块（`fluxvla.remote`）。代码已整合到 `fluxvla/remote/` 包中，gRPC 后端已移除。
 
 ## 2. 架构设计
 
@@ -25,7 +25,7 @@
 ```
 Client (Eval / 仿真)                        Server (GPU 推理)
 ┌────────────────────────────┐          ┌────────────────────────────┐
-│  env.step() → obs          │          │  serve_vla_zmq.py          │
+│  env.step() → obs          │          │  fluxvla.remote.serve      │
 │  dataset(obs) → batch dict │          │  加载 config + checkpoint   │
 │  RemoteVLAZmq              │  ZMQ     │  VLAPolicy (BasePolicy)    │
 │    torch.save(batch) ──────┼────────► │    torch.load → GPU        │
@@ -48,10 +48,10 @@ Client (Eval / 仿真)                        Server (GPU 推理)
 
 | 文件 | 类型 | 说明 |
 |------|------|------|
-| `zmq_msgpack/vla_server.py` | 新建 | TensorSerializer + VLAInferPipeline + VLAPolicy + create_vla_server |
-| `zmq_msgpack/remote_vla_zmq.py` | 新建 | RemoteVLAZmq 代理类（predict_action 接口 + profiling） |
-| `zmq_msgpack/serve_vla_zmq.py` | 新建 | CLI 启动脚本（加载 config → 构建模型 → 启动 ZMQ server） |
-| `zmq_msgpack/test_vla_zmq.py` | 新建 | 8 个单元测试 |
+| `fluxvla/remote/vla_server.py` | 核心 | TensorSerializer + VLAInferPipeline + VLAPolicy + create_vla_server |
+| `fluxvla/remote/remote_vla.py` | 核心 | RemoteVLAZmq 代理类（predict_action 接口 + profiling） |
+| `fluxvla/remote/serve.py` | 入口 | CLI 启动脚本（加载 config → 构建模型 → 启动 ZMQ server） |
+| `fluxvla/remote/test_remote_inference.py` | 测试 | 集成测试 |
 | `fluxvla/engines/runners/libero_eval_runner.py` | 修改 | 新增 `backend='zmq'` 分支 |
 | `configs/pi05/pi05_paligemma_libero_10_full_finetune.py` | 修改 | 新增 `backend` 字段 |
 
@@ -115,7 +115,7 @@ $ python -m pytest zmq_msgpack/test_server_client.py -v
 
 ```bash
 # Server (GPU:0)
-CUDA_VISIBLE_DEVICES=0 python zmq_msgpack/serve_vla_zmq.py \
+CUDA_VISIBLE_DEVICES=0 python -m fluxvla.remote.serve \
   --config configs/pi05/pi05_paligemma_libero_10_full_finetune.py \
   --ckpt-path .../step-012688-epoch-08-loss=0.0492.pt \
   --host 0.0.0.0 --port 5555
@@ -208,46 +208,16 @@ eval = dict(
 )
 ```
 
-### 使用 gRPC 后端（默认）
-
-```python
-eval = dict(
-    type='LiberoEvalRunner',
-    remote_inference=dict(
-        enabled=True,
-        backend='grpc',          # 'grpc' 使用 gRPC 后端（默认）
-        host='192.168.1.100',
-        port=50051,              # gRPC 端口
-        timeout_s=30.0,
-    ),
-    # ... 其余配置不变
-)
-```
-
 ### 命令行覆盖
 
 ```bash
-# 切换到 ZMQ
---cfg-options eval.remote_inference.backend=zmq eval.remote_inference.port=5555
-
-# 切换到 gRPC
---cfg-options eval.remote_inference.backend=grpc eval.remote_inference.port=50051
+--cfg-options eval.offload_inference.enabled=True eval.offload_inference.host=192.168.1.100 eval.offload_inference.port=5555
 ```
 
-## 8. 后端选择建议
-
-| 场景 | 推荐后端 | 原因 |
-|------|---------|------|
-| 生产部署 | gRPC | 更成熟的生态、流式推理、多语言客户端支持 |
-| 快速原型/实验 | ZMQ | 零 proto 编译、依赖更轻、代码更简洁 |
-| 机器人实时控制 | gRPC (InferStream) | 双向流天然适合连续观测-动作循环 |
-| 与 NVIDIA Isaac GR00T 集成 | ZMQ | 与 GR00T 的 PolicyServer 框架原生兼容 |
-| 跨语言客户端 | gRPC | protobuf 天然跨语言 |
-
-## 9. 总结
+## 8. 总结
 
 - ZMQ+msgpack 远程推理模块已完成实现和测试
 - 8 个单元测试全部通过，原有 12 个测试无回归
 - Libero Eval 20/20 episodes 100% 成功率，验证功能正确性
 - 延迟分析显示通信开销 < 4%，模型推理占 99%+ 时间
-- 通过 config `backend` 字段即可在 gRPC 和 ZMQ 之间切换
+- 代码已整合到 `fluxvla/remote/` 包中，gRPC 后端已移除

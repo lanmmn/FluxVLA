@@ -97,7 +97,8 @@ def test_obs_serializer():
     print('  PASSED')
 
 
-def test_end_to_end(port, dataset_cls, obs, action_shape, label):
+def test_end_to_end(port, dataset_cls, obs, action_shape, label,
+                    serializer='msgpack'):
     model = MockVLA(
         action_dim=action_shape[-1],
         action_chunk=action_shape[-2],
@@ -110,8 +111,8 @@ def test_end_to_end(port, dataset_cls, obs, action_shape, label):
     t.start()
 
     client = RemoteVLAZmq(
-        host='127.0.0.1', port=port, timeout_s=10.0, device='cuda:0')
-    # 轮询等待 server 就绪,最多 5 秒
+        host='127.0.0.1', port=port, timeout_s=10.0, device='cuda:0',
+        serializer=serializer)
     for _ in range(50):
         if client.ping():
             break
@@ -125,7 +126,7 @@ def test_end_to_end(port, dataset_cls, obs, action_shape, label):
         assert actions.device.type == 'cuda'
 
         stats = client._last_profile
-        print(f'  {label}: shape={actions.shape}, '
+        print(f'  {label} [{serializer}]: shape={actions.shape}, '
               f"payload={stats['payload_kb']:.0f}KB, "
               f"total={stats['total_ms']:.1f}ms")
 
@@ -207,6 +208,54 @@ def main():
         },
         action_shape=(1, 50, 14),
         label='Libero',
+    )
+
+    print('\n=== Test 5: Aloha-style raw obs (protobuf) ===')
+    test_end_to_end(
+        port=25554,
+        dataset_cls=MockDataset,
+        obs={
+            'cam_high':
+            np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8),
+            'cam_left_wrist':
+            np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8),
+            'cam_right_wrist':
+            np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8),
+            'qpos':
+            np.random.randn(14).astype(np.float32),
+            'task_description':
+            'pick up the brown bird toy',
+            'unnorm_key':
+            'private',
+        },
+        action_shape=(1, 50, 14),
+        label='Aloha',
+        serializer='protobuf',
+    )
+
+    print('\n=== Test 6: Libero-style raw obs (protobuf) ===')
+    test_end_to_end(
+        port=25555,
+        dataset_cls=MockLiberoDataset,
+        obs={
+            'agentview_image':
+            np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8),
+            'robot0_eye_in_hand_image':
+            np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8),
+            'robot0_eef_pos':
+            np.array([0.1, 0.2, 0.3], dtype=np.float32),
+            'robot0_eef_quat':
+            np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32),
+            'robot0_gripper_qpos':
+            np.array([0.04], dtype=np.float32),
+            'task_description':
+            'pick up the red cup',
+            'unnorm_key':
+            'libero_10',
+        },
+        action_shape=(1, 50, 14),
+        label='Libero',
+        serializer='protobuf',
     )
 
     print('\n=== ALL TESTS PASSED ===')

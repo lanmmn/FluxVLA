@@ -15,10 +15,10 @@ version would be faster if the environment supports it.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.attention.flex_attention import flex_attention, create_block_mask
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 # ── Constants matching pi05 libero10 config ──────────────────────────────
-SEQ_LEN = 703         # 512 img + 180 lang + 1 state + 10 action
+SEQ_LEN = 703  # 512 img + 180 lang + 1 state + 10 action
 NUM_Q_HEADS = 8
 NUM_KV_HEADS = 1
 HEAD_DIM = 256
@@ -38,12 +38,14 @@ BENCH_ITERS = 50
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 def build_pi05_masks(batch_size, seq_len, device):
-    att_masks = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=device)
+    att_masks = torch.zeros(
+        batch_size, seq_len, dtype=torch.bool, device=device)
     att_masks[:, 0] = True
     att_masks[:, IMG_LEN] = True
     att_masks[:, IMG_LEN + LANG_LEN] = True
     att_masks[:, IMG_LEN + LANG_LEN + STATE_LEN] = True
-    pad_masks = torch.ones(batch_size, seq_len, dtype=torch.bool, device=device)
+    pad_masks = torch.ones(
+        batch_size, seq_len, dtype=torch.bool, device=device)
     return att_masks, pad_masks
 
 
@@ -77,15 +79,17 @@ def make_flex_block_mask(att_masks, pad_masks, device):
         pad_ok = pad_masks[b, q_idx] & pad_masks[b, kv_idx]
         return segment_ok & pad_ok
 
-    return create_block_mask(mask_mod, B=B, H=None, Q_LEN=L, KV_LEN=L, device=device)
+    return create_block_mask(
+        mask_mod, B=B, H=None, Q_LEN=L, KV_LEN=L, device=device)
 
 
 def repeat_kv(hidden_states, n_rep):
     batch, num_kv_heads, slen, head_dim = hidden_states.shape
     if n_rep == 1:
         return hidden_states
-    hidden_states = hidden_states[:, :, None, :, :].expand(
-        batch, num_kv_heads, n_rep, slen, head_dim)
+    hidden_states = hidden_states[:, :,
+                                  None, :, :].expand(batch, num_kv_heads,
+                                                     n_rep, slen, head_dim)
     return hidden_states.reshape(batch, num_kv_heads * n_rep, slen, head_dim)
 
 
@@ -96,13 +100,15 @@ def eager_attn(q, k, v, mask, scaling, n_rep):
     v_exp = repeat_kv(v, n_rep)
     attn_weights = torch.matmul(q, k_exp.transpose(2, 3)) * scaling
     attn_weights = attn_weights + mask[:, :, :, :k_exp.shape[-2]]
-    attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32).to(q.dtype)
+    attn_weights = F.softmax(
+        attn_weights, dim=-1, dtype=torch.float32).to(q.dtype)
     return torch.matmul(attn_weights, v_exp).transpose(1, 2).contiguous()
 
 
 def flex_attn(q, k, v, block_mask, scaling):
     """FlexAttention — non-compiled (torch.compile hits shared mem limit on A100 with D=256)."""
-    out = flex_attention(q, k, v, block_mask=block_mask, scale=scaling, enable_gqa=True)
+    out = flex_attention(
+        q, k, v, block_mask=block_mask, scale=scaling, enable_gqa=True)
     return out.transpose(1, 2).contiguous()
 
 
@@ -110,7 +116,8 @@ def sdpa_attn(q, k, v, bool_mask, scaling):
     """SDPA with flash attention backend where possible."""
     k_exp = repeat_kv(k, NUM_Q_HEADS // NUM_KV_HEADS)
     v_exp = repeat_kv(v, NUM_Q_HEADS // NUM_KV_HEADS)
-    out = F.scaled_dot_product_attention(q, k_exp, v_exp, attn_mask=bool_mask, scale=scaling)
+    out = F.scaled_dot_product_attention(
+        q, k_exp, v_exp, attn_mask=bool_mask, scale=scaling)
     return out.transpose(1, 2).contiguous()
 
 
@@ -123,18 +130,41 @@ def sdpa_attn_no_mask(q, k, v, _, scaling):
 
 
 # ── Benchmark runner ─────────────────────────────────────────────────────
-def benchmark_fn(name, fn, mask, scaling, extra_kwargs=None, iters=BENCH_ITERS):
+def benchmark_fn(name,
+                 fn,
+                 mask,
+                 scaling,
+                 extra_kwargs=None,
+                 iters=BENCH_ITERS):
     """Benchmark forward + backward for a single attention layer."""
     extra_kwargs = extra_kwargs or {}
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
 
-    q = torch.randn(BATCH_SIZE, NUM_Q_HEADS, SEQ_LEN, HEAD_DIM,
-                     dtype=DTYPE, device=DEVICE, requires_grad=True)
-    k = torch.randn(BATCH_SIZE, NUM_KV_HEADS, SEQ_LEN, HEAD_DIM,
-                     dtype=DTYPE, device=DEVICE, requires_grad=True)
-    v = torch.randn(BATCH_SIZE, NUM_KV_HEADS, SEQ_LEN, HEAD_DIM,
-                     dtype=DTYPE, device=DEVICE, requires_grad=True)
+    q = torch.randn(
+        BATCH_SIZE,
+        NUM_Q_HEADS,
+        SEQ_LEN,
+        HEAD_DIM,
+        dtype=DTYPE,
+        device=DEVICE,
+        requires_grad=True)
+    k = torch.randn(
+        BATCH_SIZE,
+        NUM_KV_HEADS,
+        SEQ_LEN,
+        HEAD_DIM,
+        dtype=DTYPE,
+        device=DEVICE,
+        requires_grad=True)
+    v = torch.randn(
+        BATCH_SIZE,
+        NUM_KV_HEADS,
+        SEQ_LEN,
+        HEAD_DIM,
+        dtype=DTYPE,
+        device=DEVICE,
+        requires_grad=True)
 
     def run():
         out = fn(q, k, v, mask, scaling, **extra_kwargs)
@@ -176,7 +206,12 @@ def benchmark_mask_build(name, fn, att_masks, pad_masks, iters=BENCH_ITERS):
     return [s.elapsed_time(e) for s, e in zip(starts, ends)]
 
 
-def benchmark_full_pass(name, fn, mask, scaling, extra_kwargs=None, iters=BENCH_ITERS):
+def benchmark_full_pass(name,
+                        fn,
+                        mask,
+                        scaling,
+                        extra_kwargs=None,
+                        iters=BENCH_ITERS):
     """Simulate 18-layer forward+backward (attention-only)."""
     extra_kwargs = extra_kwargs or {}
     torch.cuda.empty_cache()
@@ -184,12 +219,30 @@ def benchmark_full_pass(name, fn, mask, scaling, extra_kwargs=None, iters=BENCH_
 
     def make_qkv():
         return (
-            torch.randn(BATCH_SIZE, NUM_Q_HEADS, SEQ_LEN, HEAD_DIM,
-                         dtype=DTYPE, device=DEVICE, requires_grad=True),
-            torch.randn(BATCH_SIZE, NUM_KV_HEADS, SEQ_LEN, HEAD_DIM,
-                         dtype=DTYPE, device=DEVICE, requires_grad=True),
-            torch.randn(BATCH_SIZE, NUM_KV_HEADS, SEQ_LEN, HEAD_DIM,
-                         dtype=DTYPE, device=DEVICE, requires_grad=True),
+            torch.randn(
+                BATCH_SIZE,
+                NUM_Q_HEADS,
+                SEQ_LEN,
+                HEAD_DIM,
+                dtype=DTYPE,
+                device=DEVICE,
+                requires_grad=True),
+            torch.randn(
+                BATCH_SIZE,
+                NUM_KV_HEADS,
+                SEQ_LEN,
+                HEAD_DIM,
+                dtype=DTYPE,
+                device=DEVICE,
+                requires_grad=True),
+            torch.randn(
+                BATCH_SIZE,
+                NUM_KV_HEADS,
+                SEQ_LEN,
+                HEAD_DIM,
+                dtype=DTYPE,
+                device=DEVICE,
+                requires_grad=True),
         )
 
     def run():
@@ -233,32 +286,38 @@ def stats(times):
 def print_row(name, times, peak_mem=None):
     s = stats(times)
     mem = f"  peak={peak_mem:,.0f} MB" if peak_mem else ""
-    print(f"  {name:30s}  median={s['median']:8.2f} ms  mean={s['mean']:8.2f} ms  "
-          f"p10={s['p10']:8.2f}  p90={s['p90']:8.2f}{mem}")
+    print(
+        f"  {name:30s}  median={s['median']:8.2f} ms  mean={s['mean']:8.2f} ms  "
+        f"p10={s['p10']:8.2f}  p90={s['p90']:8.2f}{mem}")
 
 
 # ── Main ─────────────────────────────────────────────────────────────────
 def main():
     print("=" * 90)
     print("Benchmark: Eager vs FlexAttention vs SDPA  |  Pi0.5 Libero10")
-    print(f"  B={BATCH_SIZE}, L={SEQ_LEN}, Hq={NUM_Q_HEADS}, Hkv={NUM_KV_HEADS}, "
-          f"D={HEAD_DIM}, layers={NUM_LAYERS}")
+    print(
+        f"  B={BATCH_SIZE}, L={SEQ_LEN}, Hq={NUM_Q_HEADS}, Hkv={NUM_KV_HEADS}, "
+        f"D={HEAD_DIM}, layers={NUM_LAYERS}")
     print(f"  dtype={DTYPE}, GPU={torch.cuda.get_device_name(0)}")
     print(f"  warmup={WARMUP_ITERS}, bench={BENCH_ITERS}")
-    print(f"  Note: flex_attention is NON-compiled (torch.compile hits triton shared mem OOR)")
+    print(
+        f"  Note: flex_attention is NON-compiled (torch.compile hits triton shared mem OOR)"
+    )
     print("=" * 90)
 
-    scaling = HEAD_DIM ** -0.5
+    scaling = HEAD_DIM**-0.5
     n_rep = NUM_Q_HEADS // NUM_KV_HEADS
     att_masks, pad_masks = build_pi05_masks(BATCH_SIZE, SEQ_LEN, DEVICE)
 
     # ── 1. Mask construction ─────────────────────────────────────────
     print("\n[1] Mask Construction Time")
     print("-" * 70)
-    eager_mask_t = benchmark_mask_build(
-        "Eager", lambda a, p: make_eager_4d_mask(p, a), att_masks, pad_masks)
+    eager_mask_t = benchmark_mask_build("Eager",
+                                        lambda a, p: make_eager_4d_mask(p, a),
+                                        att_masks, pad_masks)
     flex_mask_t = benchmark_mask_build(
-        "Flex", lambda a, p: make_flex_block_mask(a, p, DEVICE), att_masks, pad_masks)
+        "Flex", lambda a, p: make_flex_block_mask(a, p, DEVICE), att_masks,
+        pad_masks)
     print_row("Eager 4D mask", eager_mask_t)
     print_row("Flex BlockMask", flex_mask_t)
 
@@ -271,8 +330,10 @@ def main():
     print(f"\n  Eager 4D mask:  shape={list(eager_mask.shape)}, "
           f"size={eager_mask_bytes / 1024:.1f} KB")
     print(f"  Flex BlockMask: block-level metadata only (~KB)")
-    print(f"  SDPA bool mask: shape={list(sdpa_mask.shape)}, "
-          f"size={sdpa_mask.nelement() * sdpa_mask.element_size() / 1024:.1f} KB")
+    print(
+        f"  SDPA bool mask: shape={list(sdpa_mask.shape)}, "
+        f"size={sdpa_mask.nelement() * sdpa_mask.element_size() / 1024:.1f} KB"
+    )
 
     # ── 2. Single-layer attention ────────────────────────────────────
     print("\n[2] Single Layer Attention (fwd + bwd)")
@@ -280,7 +341,12 @@ def main():
 
     results = {}
 
-    t, m = benchmark_fn("Eager", eager_attn, eager_mask, scaling, extra_kwargs={'n_rep': n_rep})
+    t, m = benchmark_fn(
+        "Eager",
+        eager_attn,
+        eager_mask,
+        scaling,
+        extra_kwargs={'n_rep': n_rep})
     results['eager'] = (t, m)
     print_row("Eager", t, m)
 
@@ -312,8 +378,12 @@ def main():
 
     full_results = {}
 
-    t, m = benchmark_full_pass("Eager", eager_attn, eager_mask, scaling,
-                                extra_kwargs={'n_rep': n_rep})
+    t, m = benchmark_full_pass(
+        "Eager",
+        eager_attn,
+        eager_mask,
+        scaling,
+        extra_kwargs={'n_rep': n_rep})
     full_results['eager'] = (t, m)
     print_row("Eager 18-layer", t, m)
 
@@ -325,7 +395,8 @@ def main():
     full_results['sdpa'] = (t, m)
     print_row("SDPA 18-layer", t, m)
 
-    t, m = benchmark_full_pass("SDPA no-mask", sdpa_attn_no_mask, None, scaling)
+    t, m = benchmark_full_pass("SDPA no-mask", sdpa_attn_no_mask, None,
+                               scaling)
     full_results['sdpa_nomask'] = (t, m)
     print_row("SDPA 18-layer (no mask)", t, m)
 
@@ -346,8 +417,7 @@ def main():
     print(f"  {'Method':30s} {'1-layer (ms)':>14s} {'18-layer (ms)':>14s} "
           f"{'1L mem (MB)':>12s} {'18L mem (MB)':>12s}")
     print(f"  {'-'*30} {'-'*14} {'-'*14} {'-'*12} {'-'*12}")
-    for key, label in [('eager', 'Eager'),
-                       ('flex', 'Flex (non-compiled)'),
+    for key, label in [('eager', 'Eager'), ('flex', 'Flex (non-compiled)'),
                        ('sdpa', 'SDPA (with mask)'),
                        ('sdpa_nomask', 'SDPA (no mask)')]:
         s1 = stats(results[key][0])['median']
@@ -357,8 +427,12 @@ def main():
         print(f"  {label:30s} {s1:14.2f} {s18:14.2f} {m1:12,.0f} {m18:12,.0f}")
 
     print(f"\n  Note: flex_attention is benchmarked WITHOUT torch.compile.")
-    print(f"  With torch.compile, flex would likely be faster (uses fused triton kernels).")
-    print(f"  Current limitation: head_dim=256 exceeds A100 shared memory for compiled flex.")
+    print(
+        f"  With torch.compile, flex would likely be faster (uses fused triton kernels)."
+    )
+    print(
+        f"  Current limitation: head_dim=256 exceeds A100 shared memory for compiled flex."
+    )
     print("=" * 90)
 
 

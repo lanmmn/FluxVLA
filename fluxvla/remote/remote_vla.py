@@ -21,6 +21,8 @@ import numpy as np  # NumPy: 数组运算,raw observation 的载体
 import torch  # PyTorch: tensor 操作,action 反序列化后在 GPU 上
 import zmq  # PyZMQ: ZeroMQ 的 Python 绑定,提供 REQ/REP 通信
 
+from .serializers import (FORMAT_PROTOBUF, decode_predict_response,
+                          encode_predict_request)
 from .server_client import ObsSerializer  # 从同包导入观测序列化器: 图像 JPEG 压缩 + msgpack
 
 
@@ -39,13 +41,23 @@ class RemoteVLAZmq:
 
     def __init__(
             self,
-            host: str = 'localhost',  # 远程服务器地址
-            port: int = 5555,  # 远程服务器端口
-            timeout_s: float = 30.0,  # 单次请求超时秒数,超时后抛 ZMQError
-            device: str = 'cuda:0',  # 反序列化 action 时放到哪个设备
-            enable_profiling: bool = True):  # 是否启用性能统计
-        self._host = host  # 保存 host,用于日志输出
-        self._port = port  # 保存 port,用于日志输出
+            host: str = 'localhost',
+            port: int = 5555,
+            timeout_s: float = 30.0,
+            device: str = 'cuda:0',
+            enable_profiling: bool = True,
+            serializer: str = 'msgpack'):
+        """
+        Args:
+            serializer: Wire format for predict_action requests.
+                ``'msgpack'`` (default) or ``'protobuf'``.
+                Ping / status calls always use msgpack.
+        """
+        assert serializer in ('msgpack', 'protobuf'), \
+            f"serializer must be 'msgpack' or 'protobuf', got '{serializer}'"
+        self._serializer = serializer
+        self._host = host
+        self._port = port
         self._address = f'tcp://{host}:{port}'  # 拼接 ZMQ 连接地址,格式: tcp://host:port
         self._timeout_ms = int(timeout_s * 1000)  # 将秒转为毫秒,ZMQ 超时参数以毫秒为单位
         self._device = torch.device(device)  # 解析设备字符串为 torch.device 对象
@@ -134,61 +146,44 @@ class RemoteVLAZmq:
             torch.Tensor: 反归一化后的 action tensor,已在 self._device 上,
                 shape 为 (1, n_action_steps, action_dim)。
         """
-        t_total_start = time.perf_counter()  # 记录总计时起点 (perf_counter 精度约 ns 级)
+        t_total_start = time.perf_counter()
 
-        unnorm_key = kwargs.pop(
-            'unnorm_key', '')  # 取出 unnorm_key (用于 server 端反归一化),从 kwargs 中移除
-        # pop 而非 get: unnorm_key 不是 observation 的一部分,不应序列化发送
+        unnorm_key = kwargs.pop('unnorm_key', '')
 
-        # --- Phase 1: 序列化 raw observation ---
-        t0 = time.perf_counter()  # 序列化计时起点
-        obs = {}  # 构建纯 numpy/string 的 observation dict
-        for k, v in kwargs.items():  # 遍历所有 keyword arguments
-            if isinstance(v, torch.Tensor):  # 如果是 torch.Tensor
-                obs[k] = v.cpu().numpy(
-                )  # 先移到 CPU,再转为 numpy (ZMQ 不能直接传 tensor)
+        # --- Phase 1: Serialize raw observation ---
+        t0 = time.perf_counter()
+        obs = {}
+        for k, v in kwargs.items():
+            if isinstance(v, torch.Tensor):
+                obs[k] = v.cpu().numpy()
             else:
-                obs[k] = v  # numpy array / string / int 等直接保留
-        payload = ObsSerializer.to_bytes(
-            obs)  # 序列化: 图像 → JPEG 压缩 (~10x 压缩),其余 → npy 格式
-        t_serialize = time.perf_counter() - t0  # 序列化耗时
+                obs[k] = v
+        request = encode_predict_request(
+            obs, str(unnorm_key), fmt=self._serializer)
+        payload_size = len(request)
+        t_serialize = time.perf_counter() - t0
 
-        # --- Phase 2: ZMQ 请求-响应 (加锁保护 REQ socket 线程安全) ---
-        t1 = time.perf_counter()  # ZMQ 往返计时起点
-        request = msgpack.packb({              # 构造请求消息并用 msgpack 序列化
-            'endpoint': 'predict_action',      # 指定要调用 server 的哪个 endpoint
-            'data': {                          # endpoint 的参数
-                'obs_data': payload,           # 序列化后的 raw observation (bytes)
-                'unnorm_key': str(unnorm_key),  # 反归一化 key,如 "libero_10"
-            },
-        })
+        # --- Phase 2: ZMQ request-response ---
+        t1 = time.perf_counter()
         with self._lock:
-            self._socket.send(request)  # 发送请求 (受 SNDTIMEO 超时保护)
-            raw_response = self._socket.recv()  # 阻塞等待响应 (受 RCVTIMEO 超时保护)
-        response = msgpack.unpackb(
-            raw_response, raw=False)  # raw=False: key 统一为 str
-        t_zmq = time.perf_counter() - t1  # ZMQ 往返耗时 (包含: 网络传输 + server 全部处理时间)
+            self._socket.send(request)
+            raw_response = self._socket.recv()
+        fmt_tag = FORMAT_PROTOBUF if self._serializer == 'protobuf' else 0
+        response = decode_predict_response(raw_response, fmt=fmt_tag)
+        t_zmq = time.perf_counter() - t1
 
-        # --- 错误检查 ---
-        if isinstance(response, dict) and 'error' in response:  # server 返回了错误
+        if isinstance(response, dict) and 'error' in response:
             raise RuntimeError(f"ZMQ server error: {response['error']}")
-            # 将 server 端的异常信息传播到 client,方便调试
 
-        # --- Phase 3: 反序列化 action tensor ---
-        t2 = time.perf_counter()  # 反序列化计时起点
+        # --- Phase 3: Deserialize action tensor ---
+        t2 = time.perf_counter()
         action_buf = io.BytesIO(response['action_data'])
-        # io.BytesIO 将 bytes 包装为文件流,供 np.load 读取
         arr = np.load(action_buf, allow_pickle=False)
         actions = torch.from_numpy(arr.copy()).to(self._device)
-        # .copy() 确保内存连续; .to(device) 直接放到目标 GPU
-        t_deserialize = time.perf_counter() - t2  # 反序列化耗时
+        t_deserialize = time.perf_counter() - t2
 
-        t_total = time.perf_counter() - t_total_start  # 总耗时
-
-        # --- 提取 server 报告的推理耗时 ---
+        t_total = time.perf_counter() - t_total_start
         server_infer = response.get('infer_time', 0.0)
-        # server_infer 包含 server 端的 preprocess + model inference 时间
-        # 用于计算 network_ms = zmq_roundtrip - server_infer (纯网络传输时间)
 
         # --- 记录本次调用的 profiling 数据 ---
         self._last_profile = {
@@ -199,7 +194,7 @@ class RemoteVLAZmq:
             (t_zmq - server_infer) * 1000,  # 纯网络传输耗时 (ms) = 往返 - server推理
             'deserialize_ms': t_deserialize * 1000,  # client 反序列化耗时 (ms)
             'total_ms': t_total * 1000,  # 本次调用总耗时 (ms)
-            'payload_kb': len(payload) / 1024,  # 发送的 payload 大小 (KB)
+            'payload_kb': payload_size / 1024,
         }
         # _last_profile 供 LiberoEvalRunner 在每个 step 后读取,用于构建逐阶段 profiling 报告
 
@@ -211,7 +206,7 @@ class RemoteVLAZmq:
             self._t_deserialize += t_deserialize  # 累加反序列化耗时
             self._t_total += t_total  # 累加总耗时
             self._t_server_infer += server_infer  # 累加 server 推理耗时
-            self._payload_bytes += len(payload)  # 累加 payload 字节数
+            self._payload_bytes += payload_size
 
             if self._call_count % 50 == 0:  # 每 50 次调用打印一次平均统计
                 n = self._call_count

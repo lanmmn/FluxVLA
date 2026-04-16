@@ -14,6 +14,8 @@ import numpy as np  # NumPy: 数组运算库,机器人数据的核心载体
 import zmq  # PyZMQ: ZeroMQ 的 Python 绑定,提供高性能消息队列
 
 from .policy import BasePolicy  # 从同包导入策略抽象基类
+from .serializers import (FORMAT_PROTOBUF, decode_predict_request,
+                          encode_predict_response, detect_format)
 
 
 # =============================================================================
@@ -179,52 +181,80 @@ class PolicyServer:
         return request.get('api_token') == self.api_token  # 比较 token 是否匹配
 
     def run(self):
-        """主事件循环: 不断接收请求 → 路由 → 执行 → 返回结果。"""
-        addr = self.socket.getsockopt_string(
-            zmq.LAST_ENDPOINT)  # 获取实际绑定的地址(含端口)
+        """主事件循环: 不断接收请求 → 路由 → 执行 → 返回结果。
+
+        支持两种序列化格式 (由 client 选择, server 自动检测):
+        - msgpack (默认): 第一字节 != 0x01
+        - protobuf: 第一字节 == 0x01, 仅用于 predict_action 热路径
+        """
+        addr = self.socket.getsockopt_string(zmq.LAST_ENDPOINT)
         print(f'Server is ready and listening on {addr}')
-        poller = zmq.Poller()  # 创建 poller: 用于非阻塞地检测 socket 是否有数据到达
-        poller.register(self.socket, zmq.POLLIN)  # 注册 socket 到 poller,监听"可读"事件
-        while self.running:  # 主循环,直到 running 被设为 False
+        poller = zmq.Poller()
+        poller.register(self.socket, zmq.POLLIN)
+        while self.running:
             try:
-                socks = dict(
-                    poller.poll(timeout=500))  # 最多等 500ms,没有数据就返回空 dict
-                if self.socket not in socks:  # 500ms 内没收到请求 → 回到循环顶部检查 running
-                    continue  # 这使得 close() 设置 running=False 后最多 500ms 退出
+                socks = dict(poller.poll(timeout=500))
+                if self.socket not in socks:
+                    continue
 
-                message = self.socket.recv()  # 接收原始字节(此时一定有数据,不会阻塞)
-                request = MsgSerializer.from_bytes(
-                    message)  # 反序列化为 Python dict
+                message = self.socket.recv()
 
-                if not self._validate_token(request):  # 校验 API token
-                    self.socket.send(  # token 无效 → 返回 401 错误
+                # --- Protobuf fast-path for predict_action ---
+                if detect_format(message) == FORMAT_PROTOBUF:
+                    self._handle_protobuf_predict(message)
+                    continue
+
+                # --- Msgpack path (default, all endpoints) ---
+                request = MsgSerializer.from_bytes(message)
+
+                if not self._validate_token(request):
+                    self.socket.send(
                         MsgSerializer.to_bytes(
                             {'error': 'Unauthorized: Invalid API token'}))
-                    continue  # 跳过后续处理,等下一个请求
+                    continue
 
-                endpoint = request.get(
-                    'endpoint',
-                    'get_action')  # 读取请求的 endpoint 名称,默认 get_action
-                if endpoint not in self._endpoints:  # endpoint 不存在 → 抛异常
+                endpoint = request.get('endpoint', 'get_action')
+                if endpoint not in self._endpoints:
                     raise ValueError(f'Unknown endpoint: {endpoint}')
 
-                handler = self._endpoints[endpoint]  # 查找对应的 EndpointHandler
+                handler = self._endpoints[endpoint]
                 result = (
-                    handler.handler(**request.get(
-                        'data', {}))  # 需要输入 → 解包 data 字典作为关键字参数传入
-                    if handler.requires_input else
-                    handler.handler()  # 不需要输入 → 直接无参调用
-                )
-                self.socket.send(
-                    MsgSerializer.to_bytes(result))  # 将结果序列化后发回给 client
+                    handler.handler(**request.get('data', {}))
+                    if handler.requires_input else handler.handler())
+                self.socket.send(MsgSerializer.to_bytes(result))
             except Exception as e:
-                print(f'Error in server: {e}')  # 打印错误日志(不崩溃,继续服务)
-                self.socket.send(MsgSerializer.to_bytes({'error': str(e)
-                                                         }))  # 将错误信息返回给 client
-        # 循环退出后,清理资源
-        self.socket.setsockopt(zmq.LINGER, 0)  # LINGER=0: 立即丢弃未发送的消息,不等待
-        self.socket.close()  # 关闭 socket,释放端口
-        self.context.term()  # 终止 ZMQ 上下文,释放所有底层资源
+                print(f'Error in server: {e}')
+                self.socket.send(
+                    MsgSerializer.to_bytes({'error': str(e)}))
+
+        self.socket.setsockopt(zmq.LINGER, 0)
+        self.socket.close()
+        self.context.term()
+
+    def _handle_protobuf_predict(self, message: bytes):
+        """Handle a protobuf-encoded predict_action request."""
+        try:
+            _, obs, unnorm_key = decode_predict_request(message)
+            handler = self._endpoints.get('predict_action')
+            if handler is None:
+                resp = encode_predict_response(
+                    b'', 0.0, FORMAT_PROTOBUF,
+                    error='predict_action endpoint not registered')
+            else:
+                result = handler.handler(
+                    obs_data=None, unnorm_key=unnorm_key,
+                    _obs_dict=obs, _wire_format=FORMAT_PROTOBUF)
+                action_data = result.get('action_data', b'')
+                infer_time = result.get('infer_time', 0.0)
+                error = result.get('error', '')
+                resp = encode_predict_response(
+                    action_data, infer_time, FORMAT_PROTOBUF, error=error)
+            self.socket.send(resp)
+        except Exception as e:
+            print(f'Error in protobuf handler: {e}')
+            resp = encode_predict_response(
+                b'', 0.0, FORMAT_PROTOBUF, error=str(e))
+            self.socket.send(resp)
 
     def close(self):
         """从外部(另一个线程)优雅地停止服务器。run() 会在下次 poll 超时后退出。"""

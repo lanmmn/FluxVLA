@@ -37,7 +37,8 @@ def main():
     # 3. 构造 UR3 风格 raw observation
     obs = {
         'cam_high': np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8),
-        'cam_left_wrist': np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8),
+        'cam_left_wrist':
+        np.random.randint(0, 255, (256, 256, 3), dtype=np.uint8),
         'qpos': np.random.randn(7).astype(np.float32),
         'task_description': 'grasp the bottle',
         'unnorm_key': 'private',

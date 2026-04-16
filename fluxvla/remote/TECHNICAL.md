@@ -6,7 +6,7 @@
 +------------------+          TCP/ZMQ           +------------------+
 |   Eval Client    |  ========================  |   GPU Server     |
 |                  |                            |                  |
-| LiberoEvalRunner |                            | serve_vla_zmq.py |
+| LiberoEvalRunner |                            | fluxvla.remote.serve |
 |        |         |                            |        |         |
 | RemoteVLAZmq     |  -- predict_action req --> | VLAPolicy        |
 |   (drop-in proxy)|                            |   |              |
@@ -245,10 +245,10 @@ else:
 
 ### Server 端
 
-`serve_vla_zmq.py` 从 config 中读取 `denormalize_action` 配置并传给 `VLAPolicy`：
+`fluxvla.remote.serve` 从 config 中读取 `denormalize_action` 配置并传给 `VLAPolicy`：
 
 ```python
-# zmq_msgpack/serve_vla_zmq.py
+# fluxvla/remote/serve.py
 
 # 从 config 构建反归一化 transform
 denorm_cfg = dict(cfg.eval.denormalize_action)

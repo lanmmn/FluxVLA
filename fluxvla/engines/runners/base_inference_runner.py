@@ -129,31 +129,15 @@ class BaseInferenceRunner:
             self.dataset = build_dataset_from_cfg(dataset)
 
         if self._use_offload:
-            _backend = offload_inference.get('backend', 'zmq')
-            if _backend == 'zmq':
-                from fluxvla.remote import RemoteVLAZmq
-                self.vla = RemoteVLAZmq(
-                    host=offload_inference.get('host', 'localhost'),
-                    port=offload_inference.get('port', 5555),
-                    timeout_s=offload_inference.get('timeout_s', 30.0),
-                    device='cuda:0',
-                )
-            else:
-                import sys
-                _grpc_dir = os.path.join(
-                    Path(__file__).resolve().parent.parent.parent.parent,
-                    'grpc')
-                if _grpc_dir not in sys.path:
-                    sys.path.insert(0, _grpc_dir)
-                from remote_vla import RemoteVLA
-                self.vla = RemoteVLA(
-                    host=offload_inference.get('host', 'localhost'),
-                    port=offload_inference.get('port', 50051),
-                    timeout_s=offload_inference.get('timeout_s', 30.0),
-                    device='cuda:0',
-                )
+            from fluxvla.remote import RemoteVLAZmq
+            self.vla = RemoteVLAZmq(
+                host=offload_inference.get('host', 'localhost'),
+                port=offload_inference.get('port', 5555),
+                timeout_s=offload_inference.get('timeout_s', 30.0),
+                device='cuda:0',
+            )
             overwatch.info(
-                f'[OffloadInference] Using {_backend} VLA server at '
+                f'[OffloadInference] Using ZMQ VLA server at '
                 f'{offload_inference.get("host")}:'
                 f'{offload_inference.get("port")}')
         else:
