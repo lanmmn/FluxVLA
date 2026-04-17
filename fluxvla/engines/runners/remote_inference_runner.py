@@ -101,11 +101,11 @@ class RemoteInferenceRunner(BaseInferenceRunner):
         self._t_deserialize = 0.0
         self._t_total = 0.0
         self._t_server_infer = 0.0
+        self._t_network = 0.0
         self._payload_bytes = 0
+        self._resp_bytes = 0
+        self.last_profile = {}
 
-    # ------------------------------------------------------------------
-    # Overrides
-    # ------------------------------------------------------------------
     def run_setup(self):
         """Verify remote server connectivity instead of loading a local model."""
         set_seed_everywhere(self.seed)
@@ -161,6 +161,19 @@ class RemoteInferenceRunner(BaseInferenceRunner):
 
         t_total = time.perf_counter() - t_total_start
         server_infer = response.get('infer_time', 0.0)
+        resp_size = len(raw_response)
+        t_network = t_zmq - server_infer
+
+        self.last_profile = {
+            'serialize_ms': t_serialize * 1000,
+            'zmq_roundtrip_ms': t_zmq * 1000,
+            'server_infer_ms': server_infer * 1000,
+            'network_ms': t_network * 1000,
+            'deserialize_ms': t_deserialize * 1000,
+            'total_ms': t_total * 1000,
+            'payload_kb': payload_size / 1024,
+            'response_kb': resp_size / 1024,
+        }
 
         if self._enable_profiling:
             self._call_count += 1
@@ -169,7 +182,9 @@ class RemoteInferenceRunner(BaseInferenceRunner):
             self._t_deserialize += t_deserialize
             self._t_total += t_total
             self._t_server_infer += server_infer
+            self._t_network += t_network
             self._payload_bytes += payload_size
+            self._resp_bytes += resp_size
 
             if self._call_count % 50 == 0:
                 n = self._call_count
@@ -179,8 +194,10 @@ class RemoteInferenceRunner(BaseInferenceRunner):
                     f'avg_serialize={self._t_serialize/n*1000:.1f}ms  '
                     f'avg_zmq={self._t_zmq/n*1000:.1f}ms  '
                     f'avg_server={self._t_server_infer/n*1000:.1f}ms  '
+                    f'avg_network={self._t_network/n*1000:.1f}ms  '
                     f'avg_deser={self._t_deserialize/n*1000:.1f}ms  '
-                    f'avg_payload={self._payload_bytes/n/1024:.0f}KB')
+                    f'avg_payload={self._payload_bytes/n/1024:.0f}KB  '
+                    f'avg_resp={self._resp_bytes/n/1024:.0f}KB')
 
         return actions
 
@@ -188,9 +205,6 @@ class RemoteInferenceRunner(BaseInferenceRunner):
         """Server already denormalized; just convert to numpy and truncate."""
         return raw_action.cpu().numpy()[:self.action_chunk]
 
-    # ------------------------------------------------------------------
-    # Utilities
-    # ------------------------------------------------------------------
     def ping(self) -> bool:
         """Health-check the remote server."""
         try:

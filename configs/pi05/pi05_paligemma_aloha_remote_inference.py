@@ -15,7 +15,7 @@
 #       --config configs/pi05/pi05_paligemma_ur3_remote_inference.py
 
 inference = dict(
-    type='RemoteURInferenceRunner',
+    type='RemoteAlohaInferenceRunner',
     server_host='127.0.0.1',
     server_port=5555,
     timeout_s=30.0,

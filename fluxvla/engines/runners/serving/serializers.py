@@ -31,10 +31,6 @@ def detect_format(raw: bytes) -> int:
         return FORMAT_PROTOBUF
     return FORMAT_MSGPACK
 
-
-# =========================================================================
-# Shared obs field encoding / decoding (used by both msgpack and protobuf)
-# =========================================================================
 def encode_obs_fields(obs: dict, compress: bool = True):
     """Encode observation dict into (images, arrays, strings) dicts.
 
@@ -68,10 +64,6 @@ def decode_image(data: bytes) -> np.ndarray:
 def decode_array(data: bytes) -> np.ndarray:
     return np.load(io.BytesIO(data), allow_pickle=False)
 
-
-# =========================================================================
-# MsgSerializer: general-purpose msgpack with numpy support
-# =========================================================================
 class MsgSerializer:
     """Msgpack serializer with built-in numpy array support."""
 
@@ -97,10 +89,6 @@ class MsgSerializer:
             return {'__ndarray__': True, 'data': buf.getvalue()}
         raise TypeError(f'Cannot serialize {type(obj)}')
 
-
-# =========================================================================
-# ObsSerializer: msgpack obs (JPEG images + npy arrays)
-# =========================================================================
 class ObsSerializer:
     """Serialize raw observation dicts via msgpack."""
 
@@ -134,10 +122,6 @@ class ObsSerializer:
                 obs[k] = v
         return obs
 
-
-# =========================================================================
-# ObsSerializerProto: protobuf obs (same encoding, different container)
-# =========================================================================
 class ObsSerializerProto:
     """Serialize raw observation dicts via protobuf Observation message."""
 
@@ -166,10 +150,6 @@ class ObsSerializerProto:
             obs[k] = v
         return obs
 
-
-# =========================================================================
-# Predict request / response encode & decode
-# =========================================================================
 def encode_predict_request(
     obs: dict,
     unnorm_key: str,
