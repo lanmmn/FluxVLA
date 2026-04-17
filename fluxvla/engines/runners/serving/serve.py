@@ -8,7 +8,6 @@ Usage::
         --host 0.0.0.0 --port 5555
 """
 from __future__ import annotations
-
 import argparse
 import json
 import os
@@ -31,7 +30,9 @@ def parse_args():
     parser.add_argument(
         '--dtype', default='bf16', choices=['bf16', 'fp16', 'fp32'])
     parser.add_argument(
-        '--dataset-key', default=None, choices=['inference', 'eval'],
+        '--dataset-key',
+        default=None,
+        choices=['inference', 'eval'],
         help='Config key to load dataset pipeline from')
     return parser.parse_args()
 
@@ -112,9 +113,12 @@ def main():
         print('[serve] WARNING: No dataset pipeline found in config.')
 
     dtype_map = {
-        'bf16': torch.bfloat16, 'fp16': torch.float16, 'fp32': torch.float32}
+        'bf16': torch.bfloat16,
+        'fp16': torch.float16,
+        'fp32': torch.float32
+    }
 
-    from .vla_server import create_server
+    from .zmq_server import create_server
 
     server = create_server(
         vla=vla,

@@ -2,13 +2,13 @@
 
 ## 文件概览
 
-| 文件 | 职责 | 角色 |
-|------|------|------|
-| `serve.py` | CLI 入口，加载模型/配置，启动服务器 | 启动脚本 |
-| `vla_server.py` | 模型推理流水线 + 策略包装 + 服务器工厂 | 服务端核心 |
-| `server_client.py` | ZMQ 通信框架（PolicyServer / ObsSerializer / MsgSerializer） | 通信层 |
-| `serializers.py` | protobuf / msgpack 双格式编解码 | 序列化层 |
-| `remote_vla.py` | 客户端代理，伪装成本地 VLA 模型 | 客户端核心 |
+| 文件               | 职责                                                         | 角色       |
+| ------------------ | ------------------------------------------------------------ | ---------- |
+| `serve.py`         | CLI 入口，加载模型/配置，启动服务器                          | 启动脚本   |
+| `vla_server.py`    | 模型推理流水线 + 策略包装 + 服务器工厂                       | 服务端核心 |
+| `server_client.py` | ZMQ 通信框架（PolicyServer / ObsSerializer / MsgSerializer） | 通信层     |
+| `serializers.py`   | protobuf / msgpack 双格式编解码                              | 序列化层   |
+| `remote_vla.py`    | 客户端代理，伪装成本地 VLA 模型                              | 客户端核心 |
 
 ## 调用关系
 
@@ -78,10 +78,10 @@ sequenceDiagram
     participant Model as VLAInferPipeline
 
     Runner->>Client: predict_action(images, proprio, task_desc)
-    
+
     Note over Client: torch.Tensor → numpy
     Client->>Ser: encode_predict_request(obs, unnorm_key, fmt, compress)
-    
+
     alt protobuf
         Ser->>Ser: ObsSerializerProto.obs_to_proto()
         Note over Ser: 图像 → JPEG bytes (或 npy)<br/>数组 → npy bytes
@@ -89,11 +89,11 @@ sequenceDiagram
         Ser->>Ser: ObsSerializer.to_bytes()
         Note over Ser: 图像 → JPEG bytes (或 npy)<br/>数组 → npy bytes
     end
-    
+
     Ser-->>Client: request bytes (~30KB)
     Client->>Net: socket.send(request)
     Net->>Server: socket.recv()
-    
+
     alt protobuf (第一字节 == 0x01)
         Server->>Ser: decode_predict_request()
         Ser-->>Server: obs dict + unnorm_key
@@ -103,20 +103,20 @@ sequenceDiagram
         Server->>Policy: predict_action(obs_data=bytes)
         Policy->>Policy: ObsSerializer.from_bytes()
     end
-    
+
     Note over Policy: dataset transforms:<br/>resize, normalize, tokenize
     Policy->>Model: predict_action(**batch)
     Note over Model: GPU forward pass<br/>(autocast bf16)
     Model-->>Policy: action tensor
     Note over Policy: denormalize action
     Policy->>Policy: TensorSerializer.serialize_actions()
-    
+
     Policy-->>Server: {action_data, infer_time}
     Server->>Ser: encode_predict_response()
     Ser-->>Server: response bytes
     Server->>Net: socket.send(response)
     Net->>Client: socket.recv()
-    
+
     Client->>Ser: decode_predict_response()
     Ser-->>Client: {action_data, infer_time}
     Note over Client: np.load → torch.Tensor<br/>→ self._device
@@ -127,12 +127,12 @@ sequenceDiagram
 
 ### 当前命名的困惑点
 
-| 困惑 | 原因 |
-|------|------|
-| `serve.py` vs `vla_server.py` | 都像"服务端"，但一个是 CLI 入口，一个是业务逻辑 |
-| `server_client.py` | 名字暗示同时包含 server 和 client，实际主要是 server 通信层 |
-| `serializers.py` vs `server_client.py` 中的 `ObsSerializer` | 两个文件都有序列化逻辑，职责重叠 |
-| `remote_vla.py` | 名字不够直观，实际是"客户端代理" |
+| 困惑                                                        | 原因                                                        |
+| ----------------------------------------------------------- | ----------------------------------------------------------- |
+| `serve.py` vs `vla_server.py`                               | 都像"服务端"，但一个是 CLI 入口，一个是业务逻辑             |
+| `server_client.py`                                          | 名字暗示同时包含 server 和 client，实际主要是 server 通信层 |
+| `serializers.py` vs `server_client.py` 中的 `ObsSerializer` | 两个文件都有序列化逻辑，职责重叠                            |
+| `remote_vla.py`                                             | 名字不够直观，实际是"客户端代理"                            |
 
 ### 各文件的实际定位
 

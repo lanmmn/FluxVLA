@@ -15,7 +15,7 @@ import zmq  # PyZMQ: ZeroMQ 的 Python 绑定,提供高性能消息队列
 
 from .policy import BasePolicy  # 从同包导入策略抽象基类
 from .serializers import (FORMAT_PROTOBUF, decode_predict_request,
-                          encode_predict_response, detect_format)
+                          detect_format, encode_predict_response)
 
 
 # =============================================================================
@@ -224,8 +224,7 @@ class PolicyServer:
                 self.socket.send(MsgSerializer.to_bytes(result))
             except Exception as e:
                 print(f'Error in server: {e}')
-                self.socket.send(
-                    MsgSerializer.to_bytes({'error': str(e)}))
+                self.socket.send(MsgSerializer.to_bytes({'error': str(e)}))
 
         self.socket.setsockopt(zmq.LINGER, 0)
         self.socket.close()
@@ -238,12 +237,16 @@ class PolicyServer:
             handler = self._endpoints.get('predict_action')
             if handler is None:
                 resp = encode_predict_response(
-                    b'', 0.0, FORMAT_PROTOBUF,
+                    b'',
+                    0.0,
+                    FORMAT_PROTOBUF,
                     error='predict_action endpoint not registered')
             else:
                 result = handler.handler(
-                    obs_data=None, unnorm_key=unnorm_key,
-                    _obs_dict=obs, _wire_format=FORMAT_PROTOBUF)
+                    obs_data=None,
+                    unnorm_key=unnorm_key,
+                    _obs_dict=obs,
+                    _wire_format=FORMAT_PROTOBUF)
                 action_data = result.get('action_data', b'')
                 infer_time = result.get('infer_time', 0.0)
                 error = result.get('error', '')

@@ -211,9 +211,8 @@ class BaseInferenceRunner:
             self.vla.to(device='cuda', dtype=self.mixed_precision_dtype)
         else:
             self.vla.cuda()
-        overwatch.info(
-            f'Model ready (dtype={self.mixed_precision_dtype}). '
-            f'Seed set to {self.seed}')
+        overwatch.info(f'Model ready (dtype={self.mixed_precision_dtype}). '
+                       f'Seed set to {self.seed}')
 
     def run(self,
             initial_instruction:

@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """ZMQ remote inference runner.
 
 Inherits from BaseInferenceRunner but replaces local model inference with
@@ -20,7 +19,6 @@ observation and execution are provided by subclasses via multiple
 inheritance (e.g. RemoteURInferenceRunner, RemoteAlohaInferenceRunner).
 """
 from __future__ import annotations
-
 import io
 import threading
 import time
@@ -114,9 +112,8 @@ class RemoteInferenceRunner(BaseInferenceRunner):
         if not self.ping():
             raise ConnectionError(
                 f'Cannot reach VLA server at {self._server_address}')
-        overwatch.info(
-            f'Remote server OK at {self._server_address}. '
-            f'Seed set to {self.seed}')
+        overwatch.info(f'Remote server OK at {self._server_address}. '
+                       f'Seed set to {self.seed}')
 
     def _preprocess(self, instruction: str) -> dict:
         """Return raw observation for remote server preprocessing."""
@@ -138,7 +135,9 @@ class RemoteInferenceRunner(BaseInferenceRunner):
             else:
                 obs[k] = v
         request = encode_predict_request(
-            obs, str(unnorm_key), fmt=self._serializer,
+            obs,
+            str(unnorm_key),
+            fmt=self._serializer,
             compress=self._compress)
         payload_size = len(request)
         t_serialize = time.perf_counter() - t0

@@ -16,7 +16,6 @@ Non-predict endpoints (ping, kill, get_status) always use msgpack
 regardless of the client's serializer choice.
 """
 from __future__ import annotations
-
 import io
 from typing import Literal
 
@@ -34,6 +33,7 @@ def detect_format(raw: bytes) -> int:
         return FORMAT_PROTOBUF
     return FORMAT_MSGPACK
 
+
 class ObsSerializerProto:
     """Serialize/deserialize raw observation dicts using protobuf.
 
@@ -43,8 +43,11 @@ class ObsSerializerProto:
 
     JPEG_QUALITY = 95
     JPEG_KEYS = {
-        'cam_high', 'cam_left_wrist', 'cam_right_wrist',
-        'agentview_image', 'robot0_eye_in_hand_image',
+        'cam_high',
+        'cam_left_wrist',
+        'cam_right_wrist',
+        'agentview_image',
+        'robot0_eye_in_hand_image',
     }
 
     @staticmethod
@@ -63,9 +66,9 @@ class ObsSerializerProto:
             if (compress and isinstance(v, np.ndarray) and v.ndim == 3
                     and v.dtype == np.uint8
                     and k in ObsSerializerProto.JPEG_KEYS):
-                _, jpg = cv2.imencode(
-                    '.jpg', v,
-                    [cv2.IMWRITE_JPEG_QUALITY, ObsSerializerProto.JPEG_QUALITY])
+                _, jpg = cv2.imencode('.jpg', v, [
+                    cv2.IMWRITE_JPEG_QUALITY, ObsSerializerProto.JPEG_QUALITY
+                ])
                 msg.images[k] = jpg.tobytes()
             elif isinstance(v, np.ndarray):
                 buf = io.BytesIO()
@@ -80,13 +83,13 @@ class ObsSerializerProto:
         """Convert a protobuf ``Observation`` back to an obs dict."""
         obs: dict = {}
         for k, v in msg.images.items():
-            obs[k] = cv2.imdecode(
-                np.frombuffer(v, np.uint8), cv2.IMREAD_COLOR)
+            obs[k] = cv2.imdecode(np.frombuffer(v, np.uint8), cv2.IMREAD_COLOR)
         for k, v in msg.arrays.items():
             obs[k] = np.load(io.BytesIO(v), allow_pickle=False)
         for k, v in msg.strings.items():
             obs[k] = v
         return obs
+
 
 def encode_predict_request(
     obs: dict,
@@ -115,7 +118,10 @@ def encode_predict_request(
     payload = ObsSerializer.to_bytes(obs, compress=compress)
     return msgpack.packb({
         'endpoint': 'predict_action',
-        'data': {'obs_data': payload, 'unnorm_key': unnorm_key},
+        'data': {
+            'obs_data': payload,
+            'unnorm_key': unnorm_key
+        },
     })
 
 
@@ -161,7 +167,10 @@ def encode_predict_response(
 
     if error:
         return msgpack.packb({'error': error})
-    return msgpack.packb({'action_data': action_data, 'infer_time': infer_time})
+    return msgpack.packb({
+        'action_data': action_data,
+        'infer_time': infer_time
+    })
 
 
 def decode_predict_response(

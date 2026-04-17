@@ -9,7 +9,6 @@ Usage::
     actions = vla.predict_action(**batch)
 """
 from __future__ import annotations
-
 import io
 import threading
 import time
@@ -31,15 +30,14 @@ class RemoteVLAZmq:
     runners to treat this object identically to a local model.
     """
 
-    def __init__(
-            self,
-            host: str = 'localhost',
-            port: int = 5555,
-            timeout_s: float = 30.0,
-            device: str = 'cuda:0',
-            enable_profiling: bool = True,
-            serializer: str = 'msgpack',
-            compress: bool = True):
+    def __init__(self,
+                 host: str = 'localhost',
+                 port: int = 5555,
+                 timeout_s: float = 30.0,
+                 device: str = 'cuda:0',
+                 enable_profiling: bool = True,
+                 serializer: str = 'msgpack',
+                 compress: bool = True):
         """
         Args:
             host: Remote server hostname or IP.
@@ -128,7 +126,9 @@ class RemoteVLAZmq:
             else:
                 obs[k] = v
         request = encode_predict_request(
-            obs, str(unnorm_key), fmt=self._serializer,
+            obs,
+            str(unnorm_key),
+            fmt=self._serializer,
             compress=self._compress)
         payload_size = len(request)
         t_serialize = time.perf_counter() - t0
@@ -174,14 +174,15 @@ class RemoteVLAZmq:
 
             if self._call_count % 50 == 0:
                 n = self._call_count
-                print(f'[RemoteVLAZmq profiling] calls={n}  '
-                      f'avg_total={self._t_total/n*1000:.1f}ms  '
-                      f'avg_serialize={self._t_serialize/n*1000:.1f}ms  '
-                      f'avg_zmq_roundtrip={self._t_zmq/n*1000:.1f}ms  '
-                      f'avg_server_infer={self._t_server_infer/n*1000:.1f}ms  '
-                      f'avg_deserialize={self._t_deserialize/n*1000:.1f}ms  '
-                      f'avg_payload={self._payload_bytes/n/1024:.0f}KB',
-                      flush=True)
+                print(
+                    f'[RemoteVLAZmq profiling] calls={n}  '
+                    f'avg_total={self._t_total/n*1000:.1f}ms  '
+                    f'avg_serialize={self._t_serialize/n*1000:.1f}ms  '
+                    f'avg_zmq_roundtrip={self._t_zmq/n*1000:.1f}ms  '
+                    f'avg_server_infer={self._t_server_infer/n*1000:.1f}ms  '
+                    f'avg_deserialize={self._t_deserialize/n*1000:.1f}ms  '
+                    f'avg_payload={self._payload_bytes/n/1024:.0f}KB',
+                    flush=True)
 
         return actions
 

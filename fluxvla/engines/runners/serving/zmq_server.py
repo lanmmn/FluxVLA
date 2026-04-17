@@ -1,8 +1,7 @@
-"""Simplified ZMQ VLA inference server (2-layer architecture).
+"""ZMQ VLA inference server (2-layer architecture).
 
 Layer 1: PolicyServer -- generic ZMQ REP event loop + endpoint routing.
-Layer 2: vla_handler  -- obs deserialize -> preprocess -> inference ->
-                         denormalize -> serialize action.
+Layer 2: create_server -- factory that wires a VLA model into the server.
 
 Usage::
 
@@ -13,96 +12,18 @@ Usage::
 from __future__ import annotations
 
 import io
-import time
 import threading
+import time
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Callable
 
-import cv2
-import msgpack
 import numpy as np
 import torch
 import zmq
 
-from .serializers import (FORMAT_PROTOBUF, decode_predict_request,
-                          encode_predict_response, detect_format)
-
-
-# =========================================================================
-# Serialization helpers (kept here so serializers.py can import ObsSerializer)
-# =========================================================================
-class MsgSerializer:
-    """Msgpack serializer with built-in numpy array support."""
-
-    @staticmethod
-    def to_bytes(data: Any) -> bytes:
-        return msgpack.packb(data, default=MsgSerializer._encode)
-
-    @staticmethod
-    def from_bytes(data: bytes) -> Any:
-        return msgpack.unpackb(data, object_hook=MsgSerializer._decode)
-
-    @staticmethod
-    def _decode(obj):
-        if '__ndarray__' in obj:
-            return np.load(io.BytesIO(obj['data']), allow_pickle=False)
-        return obj
-
-    @staticmethod
-    def _encode(obj):
-        if isinstance(obj, np.ndarray):
-            buf = io.BytesIO()
-            np.save(buf, obj, allow_pickle=False)
-            return {'__ndarray__': True, 'data': buf.getvalue()}
-        raise TypeError(f'Cannot serialize {type(obj)}')
-
-
-class ObsSerializer:
-    """Serialize/deserialize raw observation dicts (JPEG images + npy arrays)."""
-
-    JPEG_QUALITY = 95
-    JPEG_KEYS = {
-        'cam_high', 'cam_left_wrist', 'cam_right_wrist',
-        'agentview_image', 'robot0_eye_in_hand_image',
-    }
-
-    @staticmethod
-    def to_bytes(obs: dict, compress: bool = True) -> bytes:
-        encoded = {}
-        for k, v in obs.items():
-            if (compress and isinstance(v, np.ndarray) and v.ndim == 3
-                    and v.dtype == np.uint8 and k in ObsSerializer.JPEG_KEYS):
-                _, jpg = cv2.imencode(
-                    '.jpg', v,
-                    [cv2.IMWRITE_JPEG_QUALITY, ObsSerializer.JPEG_QUALITY])
-                encoded[k] = {'__jpeg__': True, 'data': jpg.tobytes()}
-            elif isinstance(v, np.ndarray):
-                buf = io.BytesIO()
-                np.save(buf, v, allow_pickle=False)
-                encoded[k] = {'__ndarray__': True, 'data': buf.getvalue()}
-            else:
-                encoded[k] = v
-        return msgpack.packb(encoded)
-
-    @staticmethod
-    def from_bytes(data: bytes) -> dict:
-        raw = msgpack.unpackb(data, raw=False)
-        obs = {}
-        for k, v in raw.items():
-            if isinstance(v, dict):
-                if '__jpeg__' in v:
-                    obs[k] = cv2.imdecode(
-                        np.frombuffer(v['data'], np.uint8), cv2.IMREAD_COLOR)
-                elif '__ndarray__' in v:
-                    obs[k] = np.load(
-                        io.BytesIO(v['data']), allow_pickle=False)
-                else:
-                    obs[k] = v
-            elif isinstance(v, bytes):
-                obs[k] = v.decode()
-            else:
-                obs[k] = v
-        return obs
+from .serializers import (FORMAT_PROTOBUF, MsgSerializer, ObsSerializer,
+                          decode_predict_request, detect_format,
+                          encode_predict_response)
 
 
 # =========================================================================
@@ -213,7 +134,7 @@ class PolicyServer:
 
 
 # =========================================================================
-# VLA handler + server factory (Layer 2)
+# Server factory (Layer 2)
 # =========================================================================
 def create_server(
     vla,
@@ -251,10 +172,8 @@ def create_server(
                        _wire_format: int = 0) -> dict:
         nonlocal total_requests, total_infer_time
 
-        if _obs_dict is not None:
-            obs = _obs_dict
-        else:
-            obs = ObsSerializer.from_bytes(obs_data)
+        obs = _obs_dict if _obs_dict is not None else \
+            ObsSerializer.from_bytes(obs_data)
 
         if dataset is not None:
             result = dataset(obs)
@@ -276,8 +195,7 @@ def create_server(
         if denormalize_action is not None:
             actions_np = actions.cpu().numpy()
             d = denormalize_action(dict(
-                action=actions_np[0],
-                task_suite_name=task_suite_name))
+                action=actions_np[0], task_suite_name=task_suite_name))
             actions = torch.from_numpy(d[None].astype(np.float32))
 
         action_bytes = serialize_actions(actions)
@@ -313,6 +231,5 @@ def create_server(
     server = PolicyServer(host=host, port=port)
     server.register_endpoint('predict_action', predict_action)
     server.register_endpoint('reset', reset, requires_input=False)
-    server.register_endpoint(
-        'get_status', get_status, requires_input=False)
+    server.register_endpoint('get_status', get_status, requires_input=False)
     return server
