@@ -45,11 +45,11 @@ class BaseInferenceRunner:
     """
 
     def __init__(self,
-                 cfg: Dict,
-                 seed: str,
-                 ckpt_path: str,
-                 dataset: Dict,
-                 denormalize_action: Dict,
+                 cfg: Dict = None,
+                 seed: str = 7,
+                 ckpt_path: str = None,
+                 dataset: Dict = None,
+                 denormalize_action: Dict = None,
                  task_suite_name: str = 'private',
                  state_dim: int = 7,
                  action_chunk: int = 32,
@@ -64,58 +64,39 @@ class BaseInferenceRunner:
                  task_pose_sequences: Dict = None,
                  mixed_precision_dtype: str = 'float32',
                  enable_mixed_precision: bool = True,
-                 offload_inference: Dict = None):
+                 **kwargs):
         """Initialize the base inference runner.
 
         Args:
-            cfg (Dict): Configuration dictionary for the VLA model
-            seed (str): Random seed for reproducibility
-            ckpt_path (str): Path to model checkpoint file
-            dataset (Dict): Dataset configuration dictionary
-            denormalize_action (Dict): Action denormalization configuration
-            task_suite_name (str, optional): Name of task suite.
-                Defaults to 'private'.
-            state_dim (int, optional): Dimension of robot state vector.
-                Defaults to 7.
-            action_chunk (int, optional): Number of actions to predict at once.
-                Defaults to 32.
-            publish_rate (int, optional): ROS publishing rate in Hz.
-                Defaults to 30.
-            max_publish_step (int, optional): Maximum steps per episode.
-                Defaults to 10000.
-            use_eval_collector (bool, optional): Whether to use evaluation
-                data collector. Defaults to False.
-            use_robot_base (bool, optional): Whether to use mobile base.
-                Defaults to False.
-            disable_puppet_arm (bool, optional): Whether to disable puppet arm.
-                Defaults to False.
-            camera_names (List[str], optional): Names of camera feeds.
-                Defaults to None.
-            operator (Dict, optional): ROS operator configuration.
-                If None, uses default operator configuration.
-            task_descriptions (Dict, optional): Task descriptions mapping.
-                If None, uses empty dict.
-            task_pose_sequences (Dict, optional): Task pose sequences mapping.
-                If None, uses empty dict.
-
-        Raises:
-            AssertionError: If dataset statistics file is not found
+            cfg: Configuration dictionary for the VLA model.
+            seed: Random seed for reproducibility.
+            ckpt_path: Path to model checkpoint file.  When None, model
+                building and checkpoint loading are skipped (used by
+                RemoteInferenceRunner which delegates to a remote server).
+            dataset: Dataset configuration dictionary.
+            denormalize_action: Action denormalization configuration.
+            task_suite_name: Name of task suite.
+            state_dim: Dimension of robot state vector.
+            action_chunk: Number of actions to predict at once.
+            publish_rate: ROS publishing rate in Hz.
+            max_publish_step: Maximum steps per episode.
+            use_eval_collector: Whether to use evaluation data collector.
+            use_robot_base: Whether to use mobile base.
+            disable_puppet_arm: Whether to disable puppet arm.
+            camera_names: Names of camera feeds.
+            operator: ROS operator configuration.
+            task_descriptions: Task descriptions mapping.
+            task_pose_sequences: Task pose sequences mapping.
+            mixed_precision_dtype: Data type for mixed precision.
+            enable_mixed_precision: Whether to enable mixed precision.
         """
         from fluxvla.engines import (build_dataset_from_cfg,
                                      build_transform_from_cfg,
                                      build_vla_from_cfg)
 
-        # Initialize paths
         self.ckpt_path = ckpt_path
-        self._use_offload = (
-            offload_inference is not None
-            and offload_inference.get('enabled', False))
 
-        if self._use_offload:
-            # Remote mode: server handles denormalization and preprocessing
-            self.dataset = None
-            self.denormalize_action = None
-        else:
+        if ckpt_path is not None:
             data_stat_path = os.path.join(
                 Path(ckpt_path).resolve().parent.parent,
                 'dataset_statistics.json')
@@ -128,29 +109,19 @@ class BaseInferenceRunner:
             dataset['model_path'] = os.path.dirname(os.path.dirname(ckpt_path))
             self.dataset = build_dataset_from_cfg(dataset)
 
-        if self._use_offload:
-            from fluxvla.remote import RemoteVLAZmq
-            self.vla = RemoteVLAZmq(
-                host=offload_inference.get('host', 'localhost'),
-                port=offload_inference.get('port', 5555),
-                timeout_s=offload_inference.get('timeout_s', 30.0),
-                device='cuda:0',
-            )
-            overwatch.info(
-                f'[OffloadInference] Using ZMQ VLA server at '
-                f'{offload_inference.get("host")}:'
-                f'{offload_inference.get("port")}')
-        else:
             self.vla = build_vla_from_cfg(cfg.inference_model)
-            if ckpt_path is not None:
-                assert Path.exists(Path(ckpt_path)), \
-                    f'Checkpoint path {ckpt_path} does not exist!'
-                checkpoint = torch.load(ckpt_path, map_location='cpu')
-                if isinstance(checkpoint, dict) and 'model' in checkpoint:
-                    state_dict = checkpoint['model']
-                else:
-                    state_dict = checkpoint
-                self.vla.load_state_dict(state_dict, strict=True)
+            assert Path.exists(Path(ckpt_path)), \
+                f'Checkpoint path {ckpt_path} does not exist!'
+            checkpoint = torch.load(ckpt_path, map_location='cpu')
+            if isinstance(checkpoint, dict) and 'model' in checkpoint:
+                state_dict = checkpoint['model']
+            else:
+                state_dict = checkpoint
+            self.vla.load_state_dict(state_dict, strict=True)
+        else:
+            self.dataset = None
+            self.denormalize_action = None
+            self.vla = None
 
         # Store configuration parameters
         self.seed = seed
@@ -236,14 +207,13 @@ class BaseInferenceRunner:
         """
         set_seed_everywhere(self.seed)
         self.vla.eval()
-        if not self._use_offload:
-            if self.enable_mixed_precision:
-                self.vla.to(device='cuda', dtype=self.mixed_precision_dtype)
-            else:
-                self.vla.cuda()
+        if self.enable_mixed_precision:
+            self.vla.to(device='cuda', dtype=self.mixed_precision_dtype)
+        else:
+            self.vla.cuda()
         overwatch.info(
-            f'Model ready (offload={self._use_offload}, '
-            f'dtype={self.mixed_precision_dtype}). Seed set to {self.seed}')
+            f'Model ready (dtype={self.mixed_precision_dtype}). '
+            f'Seed set to {self.seed}')
 
     def run(self,
             initial_instruction:
@@ -310,17 +280,13 @@ class BaseInferenceRunner:
         """Observe environment and build model inputs.
 
         Args:
-            instruction (str): Task description for this chunk.
+            instruction: Task description for this chunk.
 
         Returns:
-            dict: Model-ready inputs (tensor batch for local, raw obs for
-                remote — server handles preprocessing).
+            dict: Model-ready tensor batch.
         """
         obs = self.update_observation_window()
         obs['task_description'] = instruction
-        if self._use_offload:
-            obs['unnorm_key'] = self.task_suite_name
-            return obs
         return self.dataset(obs)
 
     def _predict_action(self, inputs: dict):
@@ -347,9 +313,6 @@ class BaseInferenceRunner:
         Returns:
             np.ndarray: Denormalized actions, truncated to action_chunk.
         """
-        if self._use_offload:
-            # Server already denormalized
-            return raw_action.cpu().numpy()[:self.action_chunk]
         denormalized = self.denormalize_action(
             dict(action=raw_action.cpu().numpy()))
         return denormalized[:self.action_chunk]

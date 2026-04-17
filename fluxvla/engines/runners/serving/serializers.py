@@ -111,7 +111,7 @@ def encode_predict_request(
         req.unnorm_key = unnorm_key
         return bytes([FORMAT_PROTOBUF]) + req.SerializeToString()
 
-    from .server_client import ObsSerializer
+    from .vla_server import ObsSerializer
     payload = ObsSerializer.to_bytes(obs, compress=compress)
     return msgpack.packb({
         'endpoint': 'predict_action',
@@ -134,7 +134,7 @@ def decode_predict_request(raw: bytes) -> tuple[int, dict, str]:
         obs = ObsSerializerProto.obs_from_proto(req.obs)
         return FORMAT_PROTOBUF, obs, req.unnorm_key
 
-    from .server_client import ObsSerializer
+    from .vla_server import ObsSerializer
     parsed = msgpack.unpackb(raw, raw=False)
     data = parsed.get('data', {})
     obs = ObsSerializer.from_bytes(data['obs_data'])

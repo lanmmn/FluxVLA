@@ -80,10 +80,10 @@ class ObsSerializer:
     }
 
     @staticmethod
-    def to_bytes(obs: dict) -> bytes:
+    def to_bytes(obs: dict, compress: bool = True) -> bytes:
         encoded = {}
         for k, v in obs.items():
-            if (isinstance(v, np.ndarray) and v.ndim == 3
+            if (compress and isinstance(v, np.ndarray) and v.ndim == 3
                     and v.dtype == np.uint8 and k in ObsSerializer.JPEG_KEYS):
                 _, jpg = cv2.imencode(
                     '.jpg', v,
