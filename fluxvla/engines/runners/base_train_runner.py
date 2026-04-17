@@ -19,25 +19,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
-try:
-    from torch.cuda import nvtx
-except ImportError:
-    class _DummyNvtx:
-        @staticmethod
-        def range(message=None):
-            from contextlib import nullcontext
-            return nullcontext()
-        @staticmethod
-        def range_push(message=None):
-            pass
-        @staticmethod
-        def range_pop():
-            pass
-        @staticmethod
-        def mark(label):
-            pass
-    nvtx = _DummyNvtx()
-
 import torch
 import torch.distributed as dist
 from safetensors.torch import save_file
@@ -115,8 +96,7 @@ class BaseTrainRunner(ABC):
                  reduce_in_full_precision: bool = True,
                  mixed_precision_dtype: str = 'bf16',
                  tokenizer: Optional[Dict] = None,
-                 resume_from: Optional[str] = None,
-                 memory_snapshot: Optional[Dict] = None):
+                 resume_from: Optional[str] = None):
         from ..utils.builder import (build_collator_from_cfg,
                                      build_metric_from_cfg, build_vla_from_cfg)
 
@@ -183,23 +163,6 @@ class BaseTrainRunner(ABC):
         self.optimizer, self.lr_scheduler = None, None
         self.wandb_mode = os.environ.get('WANDB_MODE', 'online')
         self.resume_from = resume_from
-        # Profiler: set FLUXVLA_PROFILE_STEPS=N to profile N active steps
-        self._profiler = None
-        self._profiler_active_steps = int(
-            os.environ.get('FLUXVLA_PROFILE_STEPS', '0'))
-
-        # Memory Snapshot: set memory_snapshot dict in runner config to record
-        # Example: memory_snapshot=dict(enabled=True, start=3, end=5)
-        if memory_snapshot is not None and memory_snapshot.get('enabled', False):
-            self._memory_snapshot_enabled = True
-            self._memory_snapshot_start = memory_snapshot.get('start', 3)
-            self._memory_snapshot_end = memory_snapshot.get('end', 5)
-        else:
-            self._memory_snapshot_enabled = False
-            self._memory_snapshot_start = 3
-            self._memory_snapshot_end = 5
-        self._memory_snapshot_taken = False
-
         # Track if optimizer state was successfully loaded
         self.optimizer_state_loaded = False
         # Store lr_schedule for step-based scheduler
@@ -217,110 +180,6 @@ class BaseTrainRunner(ABC):
                 'Only BF16 mixed precision training is supported!'
             assert check_bloat16_supported(), \
                 'BFloat16 is not supported on this hardware; unset `mixed_precision`'  # noqa: E501
-
-    def _setup_profiler(self) -> None:
-        """Setup PyTorch Profiler. Activated via FLUXVLA_PROFILE_STEPS=N env var.
-
-        Profiles N active steps (after 1 wait + 1 warmup), saves a Chrome
-        trace JSON and logs a key-averages table to wandb.
-        """
-        if self._profiler_active_steps <= 0 or not overwatch.is_rank_zero():
-            return
-
-        import wandb
-        from torch.profiler import ProfilerActivity, profile, schedule
-
-        prof_dir = os.path.join(self.metric.run_dir, 'profiler')
-        os.makedirs(prof_dir, exist_ok=True)
-
-        def on_trace_ready(p):
-            step = self.metric.global_step
-            trace_path = os.path.join(prof_dir, f'trace_step{step}.json')
-            p.export_chrome_trace(trace_path)
-            overwatch.info(f'Profiler trace saved to {trace_path}')
-
-            if wandb.run is not None:
-                key_avgs = p.key_averages()
-                table_data = sorted([[
-                    e.key,
-                    round(e.cpu_time_total / 1000, 2),
-                    round(e.cuda_time_total / 1000, 2), e.count,
-                    round(e.cuda_memory_usage / 1024**2, 2)
-                ] for e in key_avgs if e.cuda_time_total > 0],
-                                    key=lambda x: -x[2])
-                wandb.log(
-                    {
-                        'profiler/key_averages':
-                        wandb.Table(
-                            columns=[
-                                'op', 'cpu_ms', 'cuda_ms', 'count',
-                                'cuda_mem_mb'
-                            ],
-                            data=table_data[:30])
-                    },
-                    step=step)
-
-        active = self._profiler_active_steps
-        self._profiler = profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            schedule=schedule(wait=1, warmup=1, active=active, repeat=1),
-            on_trace_ready=on_trace_ready,
-            record_shapes=True,
-            profile_memory=True,
-            with_stack=False,
-        )
-        self._profiler.start()
-        overwatch.info(
-            f'Profiler started: wait=1, warmup=1, active={active} steps')
-
-    def _profiler_step(self) -> None:
-        """Advance profiler by one step. Stops after scheduled steps finish."""
-        if self._profiler is None or not overwatch.is_rank_zero():
-            return
-        self._profiler.step()
-        # wait=1, warmup=1, active=N → done after N+2 steps
-        if self.metric.global_step >= self._profiler_active_steps + 2:
-            self._profiler.stop()
-            self._profiler = None
-
-    def _memory_snapshot_step(self) -> None:
-        """Control CUDA memory snapshot recording across training steps.
-
-        Starts recording at ``start`` step, exports snapshot at ``end`` step.
-        Configured via ``runner.memory_snapshot`` dict in config.
-        """
-        if not self._memory_snapshot_enabled or not overwatch.is_rank_zero():
-            return
-
-        step = self.metric.global_step
-
-        if step == self._memory_snapshot_start and not self._memory_snapshot_taken:
-            torch.cuda.memory._record_memory_history(
-                max_entries=100000,
-                stacks="python",
-            )
-            overwatch.info(
-                f'Memory snapshot: started recording at step {step}')
-
-        if step == self._memory_snapshot_end and not self._memory_snapshot_taken:
-            snapshot = torch.cuda.memory._snapshot()
-            snapshot_dir = os.path.join(self.metric.run_dir,
-                                        'memory_snapshot')
-            os.makedirs(snapshot_dir, exist_ok=True)
-            snapshot_path = os.path.join(snapshot_dir,
-                                         f'memory_snapshot_step{step}.pickle')
-            from pickle import dump
-            dump(snapshot, open(snapshot_path, 'wb'))
-            torch.cuda.memory._record_memory_history(enabled=None)
-            self._memory_snapshot_taken = True
-
-            alloc = torch.cuda.memory_allocated() / 1024**3
-            reserved = torch.cuda.memory_reserved() / 1024**3
-            peak = torch.cuda.max_memory_allocated() / 1024**3
-            overwatch.info(
-                f'Memory snapshot: saved to {snapshot_path} | '
-                f'allocated={alloc:.1f}GB reserved={reserved:.1f}GB '
-                f'peak={peak:.1f}GB')
 
     def _convert_batch_to_dtype(self, batch: Dict, dtype: torch.dtype) -> Dict:
         """Convert floating point tensors in batch to specified dtype.
@@ -751,7 +610,6 @@ class BaseTrainRunner(ABC):
         # Dispatch to training mode specific loop
         self.vla.train()
         self.optimizer.zero_grad()
-        self._setup_profiler()
 
         if self.training_mode == 'step_based':
             return self._run_step_based(dataloader, sampler)
@@ -780,8 +638,7 @@ class BaseTrainRunner(ABC):
 
                 # Get next batch
                 try:
-                    with nvtx.range("data_load"):
-                        batch = next(dataloader_iter)
+                    batch = next(dataloader_iter)
                 except StopIteration:
                     # Finite dataloader exhausted, start new epoch
                     self.current_epoch += 1
@@ -800,10 +657,12 @@ class BaseTrainRunner(ABC):
                     lr=self.lr_scheduler.get_last_lr()[0])
                 progress.set_description(self.metric.push())
                 progress.update()
-                self._profiler_step()
-                self._memory_snapshot_step()
 
-                # Save checkpoint: check epoch boundary by step count
+                # Save checkpoint
+                if self._should_save_step_checkpoint():
+                    self._save_and_sync()
+
+                # For infinite dataloaders: check epoch boundary by step count
                 if (self.steps_per_epoch
                         and epoch_step_count >= self.steps_per_epoch):
                     self.current_epoch += 1
@@ -863,8 +722,6 @@ class BaseTrainRunner(ABC):
                             lr=self.lr_scheduler.get_last_lr()[0])
                         iter_pbar.set_description(self.metric.push())
                         iter_pbar.update()
-                        self._profiler_step()
-                        self._memory_snapshot_step()
 
                         # For infinite dataloaders: end epoch by step count
                         if (self.steps_per_epoch
@@ -907,34 +764,15 @@ class BaseTrainRunner(ABC):
         if self.enable_mixed_precision_training:
             batch = self._convert_batch_to_dtype(batch,
                                                  self.mixed_precision_dtype)
-        with nvtx.range("forward"):
-            with torch.autocast(
-                    'cuda',
-                    dtype=self.mixed_precision_dtype,
-                    enabled=self.enable_mixed_precision_training):
-                output: CausalLMOutputWithPast = self.vla(**batch)
-                loss = output['loss']
+        with torch.autocast(
+                'cuda',
+                dtype=self.mixed_precision_dtype,
+                enabled=self.enable_mixed_precision_training):
+            output: CausalLMOutputWithPast = self.vla(**batch)
+            loss = output['loss']
 
         self.metric.commit(loss=loss)
-        with nvtx.range("backward"):
-            loss.backward()
-
-        # Capture memory snapshot at backward peak (before optimizer frees gradients)
-        if (self._memory_snapshot_enabled and not self._memory_snapshot_taken
-                and overwatch.is_rank_zero()
-                and self.metric.global_step == self._memory_snapshot_end - 1):
-            torch.cuda.synchronize()
-            peak_dir = os.path.join(self.metric.run_dir, 'memory_snapshot')
-            os.makedirs(peak_dir, exist_ok=True)
-            peak_path = os.path.join(peak_dir,
-                                     'memory_peak_backward.pickle')
-            from pickle import dump as _dump
-            _dump(torch.cuda.memory._snapshot(), open(peak_path, 'wb'))
-            alloc = torch.cuda.memory_allocated() / 1024**3
-            peak = torch.cuda.max_memory_allocated() / 1024**3
-            overwatch.info(
-                f'Memory snapshot: backward peak captured | '
-                f'allocated={alloc:.1f}GB peak={peak:.1f}GB')
+        loss.backward()
 
         # Commit per-dataset metrics
         if overwatch.is_rank_zero() and all(k in output for k in [
@@ -947,18 +785,17 @@ class BaseTrainRunner(ABC):
                     dataset_name=ds.decode(), action_accuracy=acc, l1_loss=l1)
 
         # Gradient step with fallback on optimizer state mismatch
-        with nvtx.range("optimizer_step"):
-            self.clip_grad_norm()
-            try:
+        self.clip_grad_norm()
+        try:
+            self.optimizer.step()
+        except RuntimeError as e:
+            if 'size' in str(e).lower() or 'shape' in str(e).lower():
+                self._reinit_optimizer()
                 self.optimizer.step()
-            except RuntimeError as e:
-                if 'size' in str(e).lower() or 'shape' in str(e).lower():
-                    self._reinit_optimizer()
-                    self.optimizer.step()
-                else:
-                    raise
-            self.lr_scheduler.step()
-            self.optimizer.zero_grad()
+            else:
+                raise
+        self.lr_scheduler.step()
+        self.optimizer.zero_grad()
 
         # Custom hook for subclasses
         if hasattr(self, '_custom_training_step'):

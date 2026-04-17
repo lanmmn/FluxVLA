@@ -17,7 +17,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     CheckpointImpl, apply_activation_checkpointing, checkpoint_wrapper)
-from torch.distributed.fsdp import CPUOffload, FullStateDictConfig
+from torch.distributed.fsdp import FullStateDictConfig
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import (MixedPrecision, ShardingStrategy,
                                     StateDictType)
@@ -101,11 +101,9 @@ class FSDPTrainRunner(BaseTrainRunner):
                  reduce_in_full_precision: bool = True,
                  mixed_precision_dtype: str = 'bf16',
                  sharding_strategy: str = 'hybrid-shard',
-                 cpu_offload: bool = False,
                  change_key_name: bool = False,
                  tokenizer: Optional[Dict] = None,
                  resume_from: Optional[str] = None,
-                 memory_snapshot: Optional[Dict] = None,
                  *args,
                  **kwargs) -> None:
         device_id = overwatch.local_rank()
@@ -116,12 +114,11 @@ class FSDPTrainRunner(BaseTrainRunner):
                          enable_gradient_checkpointing,
                          enable_mixed_precision_training,
                          reduce_in_full_precision, mixed_precision_dtype,
-                         tokenizer, resume_from, memory_snapshot)
+                         tokenizer, resume_from)
         self.weight_decay = weight_decay
         self.max_grad_norm = max_grad_norm
         self.lr_schedule = lr_schedule
         self.sharding_strategy = sharding_strategy
-        self.cpu_offload = cpu_offload
         if self.sharding_strategy == 'shard-grad-op':
             self.fsdp_sharding_strategy = ShardingStrategy._HYBRID_SHARD_ZERO2
         elif self.sharding_strategy == 'full-shard':
@@ -353,7 +350,6 @@ class FSDPTrainRunner(BaseTrainRunner):
             auto_wrap_policy=vla_fsdp_wrapping_policy,
             mixed_precision=fsdp_precision_policy,
             sharding_strategy=self.fsdp_sharding_strategy,
-            cpu_offload=CPUOffload(offload_params=self.cpu_offload),
             device_id=torch.cuda.current_device(),
             limit_all_gathers=True,
             use_orig_params=True,

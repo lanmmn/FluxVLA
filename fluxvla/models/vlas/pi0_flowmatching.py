@@ -21,33 +21,11 @@ import torch.nn.functional as F
 from pytest import Cache
 from torch.distributed.fsdp.wrap import _or_policy
 
-try:
-    from torch.cuda import nvtx
-except ImportError:
-    # Fallback for environments without CUDA/NVTX support
-    class _DummyNvtx:
-        @staticmethod
-        def range(label, message=None):
-            from contextlib import nullcontext
-            return nullcontext()
-        @staticmethod
-        def range_push(message=None):
-            pass
-        @staticmethod
-        def range_pop():
-            pass
-        @staticmethod
-        def mark(label):
-            pass
-    nvtx = _DummyNvtx()
-
 from fluxvla.engines import (VLAS, build_llm_backbone_from_cfg,
                              build_projector_from_cfg)
 from fluxvla.engines.utils.model_utils import (apply_rotary_pos_emb,
-                                               create_pi05_block_mask,
                                                create_sinusoidal_pos_embedding,
                                                eager_attention_forward,
-                                               flex_attention_forward,
                                                gated_residual,
                                                make_att_2d_masks, sample_beta)
 from fluxvla.engines.utils.overwatch import initialize_overwatch
@@ -215,7 +193,9 @@ class PI0FlowMatching(BaseVLA):
         if self.attention_implementation == 'fa2':
             raise NotImplementedError('FA2 is not implemented (yet)')
         elif self.attention_implementation == 'flex':
-            attention_interface = flex_attention_forward
+            # attention_interface = flex_attention_forward
+            raise NotImplementedError(
+                'Flex attention is not implemented (yet)')
         elif self.attention_implementation == 'eager':
             attention_interface = eager_attention_forward
         elif self.attention_implementation == 'xformer':
@@ -246,8 +226,7 @@ class PI0FlowMatching(BaseVLA):
         pad_masks = list()
         attn_masks = list()
         img_masks = img_masks.permute(1, 0)
-        with nvtx.range("vision_backbone+projector"):
-            img_emb = self.projector(self.vision_backbone(images))
+        img_emb = self.projector(self.vision_backbone(images))
         embs.append(img_emb)
         bsize, num_img_embs = img_emb.shape[:2]
         for img_mask in img_masks:
@@ -258,8 +237,7 @@ class PI0FlowMatching(BaseVLA):
 
             # Create attention masks so that image tokens attend to each other
             attn_masks += [0] * (num_img_embs // len(img_masks))
-        with nvtx.range("llm_embed_tokens"):
-            lang_emb = self.llm_backbone.embed_tokens(lang_tokens)
+        lang_emb = self.llm_backbone.embed_tokens(lang_tokens)
 
         # Normalize language embeddings
         lang_emb_dim = lang_emb.shape[-1]
@@ -302,8 +280,7 @@ class PI0FlowMatching(BaseVLA):
         device = states.device
 
         if self.state_proj is not None:
-            with nvtx.range("state_proj"):
-                state_emb = self.state_proj(states)
+            state_emb = self.state_proj(states)
             embs.append(state_emb[:, None, :])
             pad_masks.append(
                 torch.ones(bsize, 1, dtype=torch.bool, device=device))
@@ -314,24 +291,22 @@ class PI0FlowMatching(BaseVLA):
 
         # Embed timestep using sine-cosine positional
         # encoding with sensitivity in the range [0, 1]
-        with nvtx.range("time_embedding"):
-            time_emb = create_sinusoidal_pos_embedding(
-                timestep,
-                self.proj_width,
-                min_period=4e-3,
-                max_period=4.0,
-                device=device)
-            time_emb = time_emb.type(dtype=dtype)
+        time_emb = create_sinusoidal_pos_embedding(
+            timestep,
+            self.proj_width,
+            min_period=4e-3,
+            max_period=4.0,
+            device=device)
+        time_emb = time_emb.type(dtype=dtype)
 
         # Fuse timestep + action information using an MLP
-        with nvtx.range("action_proj+time_mlp"):
-            action_emb = self.action_in_proj(noisy_actions)
-            if time_emb.ndim == 2:
-                time_emb = time_emb[:, None, :].expand_as(action_emb)
-            action_time_emb = torch.cat([action_emb, time_emb], dim=2)
-            action_time_emb = self.action_time_mlp_in(action_time_emb)
-            action_time_emb = F.silu(action_time_emb)
-            action_time_emb = self.action_time_mlp_out(action_time_emb)
+        action_emb = self.action_in_proj(noisy_actions)
+        if time_emb.ndim == 2:
+            time_emb = time_emb[:, None, :].expand_as(action_emb)
+        action_time_emb = torch.cat([action_emb, time_emb], dim=2)
+        action_time_emb = self.action_time_mlp_in(action_time_emb)
+        action_time_emb = F.silu(action_time_emb)
+        action_time_emb = self.action_time_mlp_out(action_time_emb)
         # Add to input tokens
         embs.append(action_time_emb)
 
@@ -377,103 +352,98 @@ class PI0FlowMatching(BaseVLA):
             List[torch.Tensor]: Output embeddings after processing all layers.
         """
         for layer_idx in range(num_layers):
-            with nvtx.range(f"transformer_layer_{layer_idx}"):
-                query_states = []
-                key_states = []
-                value_states = []
-                gates = []
-                for i, hidden_states in enumerate(inputs_embeds):
-                    if hidden_states is None:
-                        continue
+            query_states = []
+            key_states = []
+            value_states = []
+            gates = []
+            for i, hidden_states in enumerate(inputs_embeds):
+                if hidden_states is None:
+                    continue
 
-                    layer = models[i].layers[layer_idx]
-                    with nvtx.range(f"layernorm+qkv_proj[{i}]"):
-                        hidden_states, gate = layer.input_layernorm(
-                            hidden_states, cond=adarms_cond[i])
-                        gates.append(gate)
-                        hidden_shape = (*hidden_states.shape[:-1], -1,
-                                        layer.self_attn.head_dim)
+                layer = models[i].layers[layer_idx]
+                hidden_states, gate = layer.input_layernorm(
+                    hidden_states, cond=adarms_cond[i])
+                gates.append(gate)
+                hidden_shape = (*hidden_states.shape[:-1], -1,
+                                layer.self_attn.head_dim)
 
-                        query_state = layer.self_attn.q_proj(hidden_states).view(
-                            hidden_shape).transpose(1, 2)
-                        key_state = layer.self_attn.k_proj(hidden_states).view(
-                            hidden_shape).transpose(1, 2)
-                        value_state = layer.self_attn.v_proj(hidden_states).view(
-                            hidden_shape).transpose(1, 2)
+                query_state = layer.self_attn.q_proj(hidden_states).view(
+                    hidden_shape).transpose(1, 2)
+                key_state = layer.self_attn.k_proj(hidden_states).view(
+                    hidden_shape).transpose(1, 2)
+                value_state = layer.self_attn.v_proj(hidden_states).view(
+                    hidden_shape).transpose(1, 2)
 
-                    query_states.append(query_state)
-                    key_states.append(key_state)
-                    value_states.append(value_state)
+                query_states.append(query_state)
+                key_states.append(key_state)
+                value_states.append(value_state)
 
-                # B,L,H,D with L sequence length, H number of heads, D head dim
-                # concatenate on the number of embeddings/tokens
-                query_states = torch.cat(query_states, dim=2)
-                key_states = torch.cat(key_states, dim=2)
-                value_states = torch.cat(value_states, dim=2)
+            # B,L,H,D with L sequence length, H number of heads, D head dim
+            # concatenate on the number of embeddings/tokens
+            query_states = torch.cat(query_states, dim=2)
+            key_states = torch.cat(key_states, dim=2)
+            value_states = torch.cat(value_states, dim=2)
 
-                with nvtx.range(f"rope_layer_{layer_idx}"):
-                    dummy_tensor = torch.zeros(
-                        query_states.shape[0],
-                        query_states.shape[2],
-                        query_states.shape[-1],
-                        device=query_states.device,
-                        dtype=query_states.dtype,
-                    )
-                    cos, sin = (
-                        self.llm_backbone.rotary_emb(dummy_tensor, position_ids))
-                    query_states, key_states = apply_rotary_pos_emb(
-                        query_states, key_states, cos, sin)
+            dummy_tensor = torch.zeros(
+                query_states.shape[0],
+                query_states.shape[2],
+                query_states.shape[-1],
+                device=query_states.device,
+                dtype=query_states.dtype,
+            )
+            cos, sin = (
+                self.llm_backbone.rotary_emb(dummy_tensor, position_ids))
+            query_states, key_states = apply_rotary_pos_emb(
+                query_states, key_states, cos, sin)
 
-                batch_size = query_states.shape[0]
-                scaling = self.llm_backbone.layers[layer_idx].self_attn.scaling
+            batch_size = query_states.shape[0]
+            scaling = self.llm_backbone.layers[layer_idx].self_attn.scaling
 
-                with nvtx.range(f"attention_layer_{layer_idx}"):
-                    att_output, _ = self.attention_interface(
-                        self.llm_backbone.layers[layer_idx].self_attn,
-                        query_states,
-                        key_states,
-                        value_states,
-                        attention_masks,
-                        scaling,
-                    )
-                # Get head_dim from the current layer, not from the model
-                head_dim = self.llm_backbone.layers[layer_idx].self_attn.head_dim
-                att_output = att_output.reshape(batch_size, -1, 1 * 8 * head_dim)
+            att_output, _ = self.attention_interface(
+                self.llm_backbone.layers[layer_idx].self_attn,
+                query_states,
+                key_states,
+                value_states,
+                attention_masks,
+                scaling,
+            )
+            # Get head_dim from the current layer, not from the model
+            head_dim = self.llm_backbone.layers[layer_idx].self_attn.head_dim
+            att_output = att_output.reshape(batch_size, -1, 1 * 8 * head_dim)
 
-                # Process layer outputs
-                outputs_embeds = []
-                start_pos = 0
-                for i, hidden_states in enumerate(inputs_embeds):
-                    if hidden_states is None:
-                        continue
-                    layer = models[i].layers[layer_idx]
-                    end_pos = start_pos + hidden_states.shape[1]
+            # Process layer outputs
+            outputs_embeds = []
+            start_pos = 0
+            for i, hidden_states in enumerate(inputs_embeds):
+                if hidden_states is None:
+                    continue
+                layer = models[i].layers[layer_idx]
+                end_pos = start_pos + hidden_states.shape[1]
 
-                    with nvtx.range(f"o_proj+ffn[{i}]_layer_{layer_idx}"):
-                        if att_output.dtype != layer.self_attn.o_proj.weight.dtype:
-                            att_output = att_output.to(
-                                layer.self_attn.o_proj.weight.dtype)
-                        out_emb = layer.self_attn.o_proj(att_output[:,
-                                                                    start_pos:end_pos])
+                if att_output.dtype != layer.self_attn.o_proj.weight.dtype:
+                    att_output = att_output.to(
+                        layer.self_attn.o_proj.weight.dtype)
+                out_emb = layer.self_attn.o_proj(att_output[:,
+                                                            start_pos:end_pos])
 
-                        # first residual
-                        out_emb = gated_residual(hidden_states, out_emb,
-                                                 gates[i])  # noqa: SLF001
-                        after_first_residual = out_emb.clone()
-                        out_emb, gate = layer.post_attention_layernorm(
-                            out_emb, cond=adarms_cond[i])
-                        # Convert to bfloat16 if the next layer (mlp) uses bfloat16
-                        if layer.mlp.up_proj.weight.dtype == torch.bfloat16:
-                            out_emb = out_emb.to(dtype=torch.bfloat16)
+                # first residual
+                out_emb = gated_residual(hidden_states, out_emb,
+                                         gates[i])  # noqa: SLF001
+                after_first_residual = out_emb.clone()
+                out_emb, gate = layer.post_attention_layernorm(
+                    out_emb, cond=adarms_cond[i])
+                # Convert to bfloat16 if the next layer (mlp) uses bfloat16
+                if layer.mlp.up_proj.weight.dtype == torch.bfloat16:
+                    out_emb = out_emb.to(dtype=torch.bfloat16)
 
-                        out_emb = layer.mlp(out_emb)
-                        # second residual
-                        out_emb = gated_residual(after_first_residual, out_emb,
-                                                 gate)  # noqa: SLF001
-                    outputs_embeds.append(out_emb)
-                    start_pos = end_pos
+                out_emb = layer.mlp(out_emb)
+                # second residual
+                out_emb = gated_residual(after_first_residual, out_emb,
+                                         gate)  # noqa: SLF001
+                outputs_embeds.append(out_emb)
+                start_pos = end_pos
 
-                inputs_embeds = outputs_embeds
+            inputs_embeds = outputs_embeds
 
         # final norm
         outputs_embeds = []
@@ -613,10 +583,6 @@ class PI0FlowMatching(BaseVLA):
             time (Optional[torch.Tensor]): Time tensor for
                 flow matching.
         """
-        from torch.profiler import record_function
-
-        nvtx.range_push("PI0_forward")
-
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
 
@@ -648,58 +614,47 @@ class PI0FlowMatching(BaseVLA):
             x_t = t[:, None, None] * noise + (1 - t[:, None, None]) * actions
 
         u_t = noise - actions
-        with nvtx.range("embed_prefix"):
-            prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
-                images=images,
-                lang_tokens=lang_tokens,
-                img_masks=img_masks,
-                lang_masks=lang_masks,
-                past_key_values=past_key_values)
-        with nvtx.range("embed_suffix"):
-            suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = (
-                self.embed_suffix(states, x_t, t))
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+            images=images,
+            lang_tokens=lang_tokens,
+            img_masks=img_masks,
+            lang_masks=lang_masks,
+            past_key_values=past_key_values)
+
+        suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = (
+            self.embed_suffix(states, x_t, t))
         inputs_embeds = [prefix_embs, suffix_embs]
         pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
         att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
 
+        attention_masks = make_att_2d_masks(pad_masks, att_masks)
         position_ids = torch.cumsum(pad_masks, dim=1) - 1
 
         # Prepare attention masks
-        with nvtx.range("mask_prepare"):
-            if self.attention_implementation == 'flex':
-                att_2d_masks_4d = create_pi05_block_mask(
-                    att_masks, pad_masks, device=att_masks.device)
-            else:
-                attention_masks = make_att_2d_masks(pad_masks, att_masks)
-                att_2d_masks_4d = self._prepare_attention_masks_4d(attention_masks)
+        att_2d_masks_4d = self._prepare_attention_masks_4d(attention_masks)
 
-        with nvtx.range("forward_model"):
-            suffix_out, _ = self.forward_model(
-                inputs_embeds=inputs_embeds,
-                attention_masks=att_2d_masks_4d,
-                position_ids=position_ids,
-                past_key_values=past_key_values,
-                use_cache=use_cache,
-                fill_kv_cache=fill_kv_cache,
-                adarms_cond=[None, adarms_cond],
-                time=time)
+        suffix_out, _ = self.forward_model(
+            inputs_embeds=inputs_embeds,
+            attention_masks=att_2d_masks_4d,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            use_cache=use_cache,
+            fill_kv_cache=fill_kv_cache,
+            adarms_cond=[None, adarms_cond],
+            time=time)
         suffix_out = suffix_out[:, -self.n_action_steps:]
         # Original openpi code, upcast attention output
         suffix_out = suffix_out.to(dtype=torch.float32)
-        with nvtx.range("action_out_proj"):
-            v_t = self.action_out_proj(suffix_out)
+        v_t = self.action_out_proj(suffix_out)
         if self.ori_action_dim is not None:
             v_t = v_t[:, :, :self.ori_action_dim]
             u_t = u_t[:, :, :self.ori_action_dim]
-        with nvtx.range("loss_compute"):
-            if action_masks is not None:
-                losses = F.mse_loss(u_t, v_t, reduction='none')
-                losses = losses * action_masks.unsqueeze(-1)
-                loss = losses.sum() / (action_masks.sum() * u_t.shape[-1] + 1e-8)
-            else:
-                loss = F.mse_loss(u_t, v_t)
-
-        nvtx.range_pop()  # PI0_forward
+        if action_masks is not None:
+            losses = F.mse_loss(u_t, v_t, reduction='none')
+            losses = losses * action_masks.unsqueeze(-1)
+            loss = losses.sum() / (action_masks.sum() * u_t.shape[-1] + 1e-8)
+        else:
+            loss = F.mse_loss(u_t, v_t)
 
         return_dict = dict(
             predictions=v_t,

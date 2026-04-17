@@ -13,25 +13,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-try:
-    from torch.cuda import nvtx
-except ImportError:
-    class _DummyNvtx:
-        @staticmethod
-        def range(message=None):
-            from contextlib import nullcontext
-            return nullcontext()
-        @staticmethod
-        def range_push(message=None):
-            pass
-        @staticmethod
-        def range_pop():
-            pass
-        @staticmethod
-        def mark(label):
-            pass
-    nvtx = _DummyNvtx()
-
 # from xformers.ops import memory_efficient_attention
 
 
@@ -176,80 +157,6 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
                                  head_dim)
 
 
-def create_pi05_block_mask(att_masks, pad_masks, device):
-    """Build a FlexAttention BlockMask from Pi0.5's 1D masks.
-
-    Args:
-        att_masks: (B, L) bool tensor — segment boundary indicators.
-        pad_masks: (B, L) bool tensor — padding masks.
-        device: CUDA device.
-
-    Returns:
-        BlockMask object for use with flex_attention.
-    """
-    from torch.nn.attention.flex_attention import create_block_mask
-
-    B, L = att_masks.shape
-    segment_ids = torch.cumsum(att_masks.int(), dim=1)  # (B, L)
-
-    def mask_mod(b, h, q_idx, kv_idx):
-        q_seg = segment_ids[b, q_idx]
-        kv_seg = segment_ids[b, kv_idx]
-        segment_ok = q_seg >= kv_seg
-        pad_ok = pad_masks[b, q_idx] & pad_masks[b, kv_idx]
-        return segment_ok & pad_ok
-
-    return create_block_mask(
-        mask_mod,
-        B=B,
-        H=None,
-        Q_LEN=L,
-        KV_LEN=L,
-        device=device,
-    )
-
-
-_flex_attention_compiled = None
-
-
-def flex_attention_forward(
-    module: nn.Module,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attention_mask,
-    scaling: float,
-    dropout: float = 0.0,
-    **kwargs,
-):
-    """FlexAttention forward with compiled kernel and GQA support.
-
-    Args:
-        module: Attention module (used for interface compatibility).
-        query: (B, Hq, L, D) query states.
-        key: (B, Hkv, L, D) key states.
-        value: (B, Hkv, L, D) value states.
-        attention_mask: BlockMask object from create_pi05_block_mask.
-        scaling: Attention scaling factor.
-    """
-    global _flex_attention_compiled
-    if _flex_attention_compiled is None:
-        from torch.nn.attention.flex_attention import flex_attention
-        _flex_attention_compiled = torch.compile(flex_attention)
-
-    with nvtx.range("flex_attention"):
-        attn_output = _flex_attention_compiled(
-            query,
-            key,
-            value,
-            block_mask=attention_mask,
-            scale=scaling,
-            enable_gqa=True,
-        )
-    attn_output = attn_output.transpose(1, 2).contiguous()
-    return attn_output, None
-
-
 def eager_attention_forward(
     module: nn.Module,
     query: torch.Tensor,
@@ -260,21 +167,20 @@ def eager_attention_forward(
     dropout: float = 0.0,
     **kwargs,
 ):
-    with nvtx.range("eager_attention"):
-        key_states = repeat_kv(key, module.num_key_value_groups)
-        value_states = repeat_kv(value, module.num_key_value_groups)
+    key_states = repeat_kv(key, module.num_key_value_groups)
+    value_states = repeat_kv(value, module.num_key_value_groups)
 
-        attn_weights = torch.matmul(query, key_states.transpose(2, 3)) * scaling
-        if attention_mask is not None:
-            causal_mask = attention_mask[:, :, :, :key_states.shape[-2]]
-            attn_weights = attn_weights + causal_mask
+    attn_weights = torch.matmul(query, key_states.transpose(2, 3)) * scaling
+    if attention_mask is not None:
+        causal_mask = attention_mask[:, :, :, :key_states.shape[-2]]
+        attn_weights = attn_weights + causal_mask
 
-        attn_weights = nn.functional.softmax(
-            attn_weights, dim=-1, dtype=torch.float32).to(query.dtype)
-        attn_weights = nn.functional.dropout(
-            attn_weights, p=dropout, training=module.training)
-        attn_output = torch.matmul(attn_weights, value_states)
-        attn_output = attn_output.transpose(1, 2).contiguous()
+    attn_weights = nn.functional.softmax(
+        attn_weights, dim=-1, dtype=torch.float32).to(query.dtype)
+    attn_weights = nn.functional.dropout(
+        attn_weights, p=dropout, training=module.training)
+    attn_output = torch.matmul(attn_weights, value_states)
+    attn_output = attn_output.transpose(1, 2).contiguous()
 
     return attn_output, attn_weights
 

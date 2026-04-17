@@ -97,11 +97,10 @@ model = dict(
         use_adarms=True,
         use_cache=True,
         vocab_size=257152),
-    attention_implementation='eager',
     freeze_llm_backbone=False,
     freeze_vision_backbone=False,
     pretrained_name_or_path=  # noqa: E251
-    '/limx_embop/tos/users/liyinhao/checkpoints/pi05_libero/model.safetensors',  # noqa: E501
+    './checkpoints/pi05_libero/model.safetensors',  # noqa: E501
     name_mapping={
         'llm_backbone': 'paligemma_with_expert.paligemma.model.language_model',
         'vision_backbone.vision':
@@ -130,7 +129,7 @@ train_dataloader = dict(
         datasets=dict(
             type='ParquetDataset',
             data_root_path=  # noqa: E251
-            '/limx_embop/tos/limx_mani_data/raw_data/LIBERO_lerobot/libero_10_no_noops_lerobotv2.1',  # noqa: E501
+            './datasets/libero_10_no_noops_lerobotv2.1',  # noqa: E501
             transforms=[
                 dict(
                     type='ProcessParquetInputs',

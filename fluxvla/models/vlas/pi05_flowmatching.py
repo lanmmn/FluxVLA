@@ -61,7 +61,6 @@ class PI05FlowMatching(PI0FlowMatching):
     """
 
     def __init__(self, **kwargs):
-        kwargs.pop('mini_batches', None)
         rtc_cfg = kwargs.get('rtc_training_config')
         if rtc_cfg and rtc_cfg.get('enabled', False):
             raise ValueError(

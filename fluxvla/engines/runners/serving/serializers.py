@@ -8,7 +8,6 @@ Two formats are supported for the predict_action hot path:
 Format detection: first byte ``0x01`` = protobuf, otherwise msgpack.
 """
 from __future__ import annotations
-
 import io
 from typing import Any, Literal
 
