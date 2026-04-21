@@ -1,0 +1,57 @@
+# =============================================================================
+# FluxVLA Orin Client -- lightweight remote inference client for Jetson
+#
+# No model weights, no CUDA compilation. Connects to a remote fluxvla-server
+# via ZMQ to offload model inference to a GPU server.
+#
+# Build (on Orin or cross-build host):
+#   docker build -f docker/Dockerfile.orin-client \
+#     --build-arg JETPACK_TAG=r35.4.1 \
+#     -t fluxvla-orin-client .
+#
+# Run:
+#   docker run --runtime nvidia --network host \
+#     fluxvla-orin-client \
+#     --config configs/pi05/pi05_paligemma_aloha_remote_inference.py
+# =============================================================================
+
+ARG JETPACK_TAG=r35.4.1
+FROM nvcr.io/nvidia/l4t-jetpack:${JETPACK_TAG}
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3-pip python3-dev libgl1 libglib2.0-0 && \
+    rm -rf /var/lib/apt/lists/*
+
+# ----- Install PyTorch for Jetson -----
+# JetPack 5.x (r35): PyTorch 2.1 is the latest well-supported version.
+# JetPack 6.x (r36): PyTorch 2.5+.
+# For the remote client, PyTorch is only used for tensor operations (CPU),
+# so exact version is less critical.
+ARG TORCH_WHL_URL=https://developer.download.nvidia.com/compute/redist/jp/v512/pytorch/torch-2.1.0a0+41361538.nv23.06-cp38-cp38-linux_aarch64.whl
+RUN pip3 install --no-cache-dir ${TORCH_WHL_URL} || \
+    pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+WORKDIR /app
+
+# Minimal dependencies only
+COPY docker/requirements-orin-client.txt /app/requirements-orin-client.txt
+RUN pip3 install --no-cache-dir -r /app/requirements-orin-client.txt
+
+# Copy only the fluxvla source (no weights, no heavy deps)
+COPY fluxvla/ /app/fluxvla/
+COPY configs/ /app/configs/
+COPY scripts/ /app/scripts/
+COPY setup.py setup.cfg /app/
+
+# Install fluxvla in CPU-only mode (skip CUDA extensions)
+RUN pip3 install --no-build-isolation --no-deps -e . 2>/dev/null || \
+    pip3 install --no-deps -e . --global-option="--skip-ext" 2>/dev/null || \
+    python3 -c "import setuptools; setuptools.setup(name='fluxvla', packages=setuptools.find_packages())" 2>/dev/null || \
+    true
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
+ENTRYPOINT ["python3", "scripts/inference_real_robot.py"]
+CMD ["--help"]

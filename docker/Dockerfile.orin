@@ -1,0 +1,80 @@
+# =============================================================================
+# FluxVLA Orin -- full local inference on Jetson AGX Orin
+#
+# Supports both local model inference and remote inference client mode.
+# Builds CUDA extensions natively on aarch64; skips flash-attn
+# (uses PyTorch SDPA fallback automatically).
+#
+# Build (MUST run on Orin or aarch64 host with CUDA):
+#   docker build -f docker/Dockerfile.orin \
+#     --build-arg JETPACK_TAG=r35.4.1 \
+#     -t fluxvla-orin .
+#
+# For JetPack 6.x:
+#   docker build -f docker/Dockerfile.orin \
+#     --build-arg JETPACK_TAG=r36.4.0 \
+#     --build-arg TORCH_WHL_URL=<jp6-torch-whl-url> \
+#     -t fluxvla-orin .
+#
+# Run:
+#   docker run --runtime nvidia --network host \
+#     -v ./checkpoints:/app/checkpoints \
+#     -v ./work_dirs:/app/work_dirs \
+#     fluxvla-orin \
+#     --config configs/pi05/pi05_paligemma_aloha_remote_inference.py \
+#     --ckpt-path checkpoints/pi05_libero/model.safetensors
+# =============================================================================
+
+ARG JETPACK_TAG=r35.4.1
+FROM nvcr.io/nvidia/l4t-jetpack:${JETPACK_TAG}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3-pip python3-dev python3-setuptools \
+        git ninja-build cmake \
+        libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+        libegl-dev libgl1-mesa-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ----- PyTorch for Jetson -----
+# JetPack 5.x (r35.x): PyTorch 2.1.x from NVIDIA
+# JetPack 6.x (r36.x): PyTorch 2.5+ or build from jetson-containers
+# Override TORCH_WHL_URL at build time for your JetPack version.
+ARG TORCH_WHL_URL=https://developer.download.nvidia.com/compute/redist/jp/v512/pytorch/torch-2.1.0a0+41361538.nv23.06-cp38-cp38-linux_aarch64.whl
+RUN pip3 install --no-cache-dir ${TORCH_WHL_URL} || \
+    echo "WARN: Pre-built wheel failed. Install PyTorch manually for your JetPack."
+
+# torchvision from source for Jetson (matches PyTorch)
+ARG TORCHVISION_VERSION=0.16.0
+RUN pip3 install --no-cache-dir \
+    "torchvision==${TORCHVISION_VERSION}" 2>/dev/null || \
+    pip3 install --no-cache-dir \
+    "git+https://github.com/pytorch/vision.git@v${TORCHVISION_VERSION}" || \
+    echo "WARN: torchvision install skipped."
+
+WORKDIR /app
+
+# Python dependencies (server subset, no tensorflow/libero/mujoco)
+COPY docker/requirements-server.txt /app/requirements-server.txt
+RUN pip3 install --no-cache-dir -r /app/requirements-server.txt || true
+
+# Copy project source
+COPY . /app/
+
+# Build CUDA extensions for Orin (SM 8.7)
+ENV FORCE_CUDA=1
+ENV TORCH_CUDA_ARCH_LIST="8.7"
+RUN pip3 install --no-build-isolation -e . || \
+    pip3 install --no-deps -e .
+
+# NOTE: flash-attn is NOT installed. The codebase automatically
+# falls back to PyTorch's scaled_dot_product_attention (SDPA).
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+ENV MUJOCO_GL=egl
+
+ENTRYPOINT ["python3", "scripts/inference_real_robot.py"]
+CMD ["--help"]

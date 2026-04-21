@@ -66,13 +66,17 @@ class EagleBackbone(nn.Module):
         elif hasattr(config, 'num_hidden_layers'):
             config.num_hidden_layers = select_layer
 
-        # Ensure flash_attention_2 is set for both vision and text configs
-        # This must be done BEFORE model creation
-        config._attn_implementation = 'flash_attention_2'
+        # Pick best available attention: flash_attention_2 > sdpa > eager
+        try:
+            import flash_attn  # noqa: F401
+            _attn_impl = 'flash_attention_2'
+        except ImportError:
+            _attn_impl = 'sdpa'
+        config._attn_implementation = _attn_impl
         if hasattr(config, 'vision_config'):
-            config.vision_config._attn_implementation = 'flash_attention_2'
+            config.vision_config._attn_implementation = _attn_impl
         if hasattr(config, 'text_config'):
-            config.text_config._attn_implementation = 'flash_attention_2'
+            config.text_config._attn_implementation = _attn_impl
 
         # Use torch_dtype parameter to initialize directly with the target
         # dtype This avoids the expensive .to() conversion after initialization
@@ -218,13 +222,17 @@ class EagleInferenceBackbone(nn.Module):
         elif hasattr(config, 'num_hidden_layers'):
             config.num_hidden_layers = select_layer
 
-        # Ensure flash_attention_2 is set for both vision and text configs
-        # This must be done BEFORE model creation
-        config._attn_implementation = 'flash_attention_2'
+        # Pick best available attention: flash_attention_2 > sdpa > eager
+        try:
+            import flash_attn  # noqa: F401
+            _attn_impl = 'flash_attention_2'
+        except ImportError:
+            _attn_impl = 'sdpa'
+        config._attn_implementation = _attn_impl
         if hasattr(config, 'vision_config'):
-            config.vision_config._attn_implementation = 'flash_attention_2'
+            config.vision_config._attn_implementation = _attn_impl
         if hasattr(config, 'text_config'):
-            config.text_config._attn_implementation = 'flash_attention_2'
+            config.text_config._attn_implementation = _attn_impl
 
         # Use torch_dtype parameter to initialize directly with the target
         # dtype This avoids the expensive .to() conversion after initialization

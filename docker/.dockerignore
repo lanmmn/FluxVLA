@@ -1,0 +1,43 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+dist
+build
+*.so
+
+# IDE
+.vscode
+.idea
+.cursor
+*.swp
+*.swo
+
+# Data & weights (mount at runtime)
+checkpoints
+work_dirs
+datasets
+*.pt
+*.pth
+*.safetensors
+*.bin
+
+# Dev / CI artifacts
+.pytest_cache
+.mypy_cache
+.tox
+htmlcov
+*.log
+
+# Docker
+docker/
+
+# Docs (not needed in image)
+assets
+*.md
+!fluxvla/engines/runners/serving/README.md

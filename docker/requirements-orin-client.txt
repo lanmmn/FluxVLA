@@ -1,0 +1,7 @@
+# Minimal dependencies for RemoteInferenceRunner on Jetson Orin.
+# No model weights or CUDA compilation needed.
+msgpack
+numpy==1.26.4
+opencv-python-headless
+pyzmq
+safetensors

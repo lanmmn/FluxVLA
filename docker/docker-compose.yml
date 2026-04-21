@@ -1,0 +1,37 @@
+# FluxVLA Docker Compose -- x86 GPU server for remote inference
+#
+# Usage:
+#   cd docker/
+#   docker compose up server
+#
+# The Orin client runs on the Jetson device separately, not in this compose.
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+    image: fluxvla-server:latest
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "5555:5555"
+    volumes:
+      - ../checkpoints:/app/checkpoints
+      - ../work_dirs:/app/work_dirs
+      - ../configs:/app/configs
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    command: >
+      --config configs/pi05/pi05_paligemma_aloha_remote_inference.py
+      --ckpt-path checkpoints/pi05_libero/model.safetensors
+      --host 0.0.0.0
+      --port 5555
+      --dtype bf16
+    restart: unless-stopped

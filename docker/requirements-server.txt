@@ -1,0 +1,25 @@
+# Core inference dependencies for the x86 GPU server image.
+# Intentionally excludes heavy packages not needed for serving
+# (tensorflow, libero, mujoco, robosuite, etc.).
+accelerate==0.33.0
+cloudpickle
+datasets==4.0.0
+diffusers==0.30.2
+draccus==0.10.0
+easydict==1.9
+einops==0.4.1
+future==0.18.2
+hydra-core==1.2.0
+jsonlines==4.0.0
+matplotlib
+mmengine==0.10.7
+msgpack
+numpy==1.26.4
+opencv-python-headless
+peft==0.11.1
+pyzmq
+safetensors
+sentencepiece==0.1.99
+timm==0.9.10
+tqdm-loggable==0.2
+transformers==4.53.2
