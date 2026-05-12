@@ -25,6 +25,45 @@ Reference:
 import torch
 
 
+def get_training_delay_weights(max_delay,
+                               distribution='exponential',
+                               temperature=1.0,
+                               device='cpu'):
+    """Return normalized weights for RTC delays in [0, max_delay).
+
+    This is the deterministic counterpart of ``sample_training_delay`` and is
+    useful when all RTC delay branches are optimized together in one forward
+    pass.
+
+    Args:
+        max_delay: Maximum delay value (exclusive).
+        distribution: 'exponential' (favors small delays) or 'uniform'.
+        temperature: Exponential temperature. Only used when
+            distribution='exponential'.
+        device: Torch device.
+
+    Returns:
+        Tensor of shape (max_delay,) whose entries sum to 1.
+    """
+    if max_delay <= 0:
+        return torch.ones(1, dtype=torch.float32, device=device)
+
+    if temperature <= 0:
+        raise ValueError(f'Invalid temperature: {temperature}. Expected > 0.')
+
+    if distribution == 'exponential':
+        weights = torch.exp(
+            torch.arange(max_delay, dtype=torch.float32, device=device).flip(0)
+            / temperature)
+    elif distribution == 'uniform':
+        weights = torch.ones(max_delay, dtype=torch.float32, device=device)
+    else:
+        raise ValueError(f'Unknown distribution: {distribution}. '
+                         f"Expected 'exponential' or 'uniform'.")
+
+    return weights / weights.sum()
+
+
 def sample_training_delay(batch_size,
                           max_delay,
                           distribution='exponential',

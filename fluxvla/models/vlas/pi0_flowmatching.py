@@ -24,6 +24,7 @@ from torch.distributed.fsdp.wrap import _or_policy
 from fluxvla.engines import (VLAS, build_llm_backbone_from_cfg,
                              build_projector_from_cfg)
 from fluxvla.engines.utils.model_utils import (apply_rotary_pos_emb,
+                                               build_shared_obs_att_2d_masks_and_position_ids,
                                                create_sinusoidal_pos_embedding,
                                                eager_attention_forward,
                                                gated_residual,
@@ -200,6 +201,147 @@ class PI0FlowMatching(BaseVLA):
                 f'Invalid attention implementation: {self.attention_implementation}. '  # noqa: E501
                 "Expected one of ['sdpa', 'eager'].")
         return attention_interface
+
+    def _rtc_shared_observation_enabled(self):
+        rtc_cfg = self.rtc_training_config or {}
+        return (rtc_cfg.get('enabled', False)
+                and rtc_cfg.get('shared_observation', False)
+                and rtc_cfg.get('max_delay', 0) > 0)
+
+    def _expand_shared_observation_branches(self, tensor, num_branches):
+        if tensor is None:
+            return None
+        return tensor.unsqueeze(1).expand(-1, num_branches,
+                                          *tensor.shape[1:]).reshape(
+                                              tensor.shape[0] * num_branches,
+                                              *tensor.shape[1:])
+
+    def _concat_shared_suffix_branches(self, tensor, batch_size, num_branches):
+        return tensor.view(batch_size, num_branches, tensor.shape[1],
+                           tensor.shape[2]).reshape(batch_size, -1,
+                                                    tensor.shape[-1])
+
+    def _concat_shared_adarms_cond(self, cond, batch_size, num_branches,
+                                   suffix_len):
+        if cond is None:
+            return None
+        if cond.ndim == 2:
+            return cond.view(batch_size, num_branches, -1).unsqueeze(2).expand(
+                -1, -1, suffix_len, -1).reshape(batch_size,
+                                                num_branches * suffix_len, -1)
+        if cond.ndim == 3:
+            return cond.view(batch_size, num_branches, suffix_len,
+                             -1).reshape(batch_size,
+                                         num_branches * suffix_len, -1)
+        raise ValueError('Unsupported shared AdaRMS cond shape: '
+                         f'{tuple(cond.shape)}')
+
+    def _prepare_shared_rtc_training_inputs(self, states, actions,
+                                            action_masks, noise, time):
+        from fluxvla.engines.utils.rtc_training import (
+            apply_rtc_time_conditioning, get_training_delay_weights)
+
+        rtc_cfg = self.rtc_training_config or {}
+        batch_size, n_action_steps, action_dim = actions.shape
+        num_branches = rtc_cfg.get('max_delay', 0)
+        device = actions.device
+
+        if noise is None:
+            noise = self.sample_noise(
+                (batch_size, num_branches, n_action_steps, action_dim),
+                device=device)
+        elif noise.ndim == 3:
+            noise = noise[:, None, :, :].expand(-1, num_branches, -1, -1)
+        elif noise.ndim == 4:
+            if noise.shape[:2] != (batch_size, num_branches):
+                raise ValueError('Shared-observation RTC expects noise with '
+                                 f'shape (B, {num_branches}, T, D), got '
+                                 f'{tuple(noise.shape)}.')
+        else:
+            raise ValueError('Unsupported noise shape for shared-observation '
+                             f'RTC: {tuple(noise.shape)}')
+
+        if time is None:
+            time = self.sample_time(batch_size * num_branches,
+                                    device).view(batch_size, num_branches)
+        elif time.ndim == 1:
+            if time.shape[0] == batch_size:
+                time = time[:, None].expand(-1, num_branches)
+            elif time.shape[0] == batch_size * num_branches:
+                time = time.view(batch_size, num_branches)
+            else:
+                raise ValueError('Shared-observation RTC expects time with '
+                                 f'shape (B,) or (B*{num_branches},), got '
+                                 f'{tuple(time.shape)}.')
+        elif time.ndim == 2:
+            if time.shape != (batch_size, num_branches):
+                raise ValueError('Shared-observation RTC expects time with '
+                                 f'shape (B, {num_branches}), got '
+                                 f'{tuple(time.shape)}.')
+        else:
+            raise ValueError('Unsupported time shape for shared-observation '
+                             f'RTC: {tuple(time.shape)}')
+
+        states_flat = self._expand_shared_observation_branches(
+            states, num_branches)
+        actions_flat = self._expand_shared_observation_branches(
+            actions, num_branches)
+        masks_flat = self._expand_shared_observation_branches(
+            action_masks, num_branches)
+        noise_flat = noise.reshape(batch_size * num_branches, n_action_steps,
+                                   action_dim)
+        time_flat = time.reshape(batch_size * num_branches)
+
+        delays = torch.arange(
+            num_branches, dtype=torch.long,
+            device=device).unsqueeze(0).expand(batch_size, -1).reshape(-1)
+        t, masks_flat = apply_rtc_time_conditioning(
+            time_flat, masks_flat, delays, n_action_steps, clean_time=0.0)
+        x_t = t.unsqueeze(-1) * noise_flat + (1 - t.unsqueeze(-1)) * actions_flat
+        u_t = noise_flat - actions_flat
+
+        weighting_mode = rtc_cfg.get('shared_observation_loss_weighting',
+                                     'distribution')
+        if weighting_mode == 'distribution':
+            branch_weights = get_training_delay_weights(
+                max_delay=num_branches,
+                distribution=rtc_cfg.get('distribution', 'exponential'),
+                temperature=rtc_cfg.get('temperature', 1.0),
+                device=device)
+        elif weighting_mode == 'uniform':
+            branch_weights = torch.ones(
+                num_branches, dtype=torch.float32, device=device)
+            branch_weights = branch_weights / branch_weights.sum()
+        else:
+            raise ValueError('Unknown shared_observation_loss_weighting: '
+                             f'{weighting_mode}. Expected "distribution" '
+                             'or "uniform".')
+
+        branch_weights = branch_weights.unsqueeze(0).expand(batch_size,
+                                                            -1).reshape(-1)
+        return (num_branches, states_flat, actions_flat, masks_flat, noise_flat,
+                time_flat, t, x_t, u_t, branch_weights)
+
+    def _prepare_shared_rtc_attention_inputs(self, batch_size, num_branches,
+                                             prefix_pad_masks,
+                                             prefix_att_masks,
+                                             suffix_pad_masks,
+                                             suffix_att_masks):
+        offset_mask = torch.ones(
+            batch_size,
+            num_branches,
+            dtype=torch.bool,
+            device=prefix_pad_masks.device)
+        att_2d_masks, position_ids = (
+            build_shared_obs_att_2d_masks_and_position_ids(
+                prefix_pad_masks=prefix_pad_masks,
+                prefix_att_masks=prefix_att_masks,
+                suffix_pad_masks=suffix_pad_masks,
+                suffix_att_masks=suffix_att_masks,
+                num_offsets=num_branches,
+                offset_mask=offset_mask,
+            ))
+        return att_2d_masks, position_ids
 
     def embed_prefix(self, images, lang_tokens, img_masks, lang_masks, *args,
                      **kwargs):
@@ -563,6 +705,83 @@ class PI0FlowMatching(BaseVLA):
             time (Optional[torch.Tensor]): Time tensor for
                 flow matching.
         """
+        if self._rtc_shared_observation_enabled():
+            batch_size = actions.shape[0]
+            n_action_steps = actions.shape[1]
+            (num_branches, states_flat, _, action_masks_flat, _, time_flat, t,
+             x_t, u_t, branch_weights) = self._prepare_shared_rtc_training_inputs(
+                 states, actions, action_masks, noise, time)
+
+            prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+                images=images,
+                lang_tokens=lang_tokens,
+                img_masks=img_masks,
+                lang_masks=lang_masks,
+                past_key_values=past_key_values)
+
+            suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = (
+                self.embed_suffix(states_flat, x_t, t))
+            suffix_len = suffix_embs.shape[1]
+
+            suffix_embs = self._concat_shared_suffix_branches(
+                suffix_embs, batch_size, num_branches)
+            adarms_cond = self._concat_shared_adarms_cond(
+                adarms_cond, batch_size, num_branches, suffix_len)
+
+            single_suffix_pad_masks = suffix_pad_masks[:batch_size]
+            single_suffix_att_masks = suffix_att_masks[:batch_size]
+            attention_masks, position_ids = (
+                self._prepare_shared_rtc_attention_inputs(
+                    batch_size=batch_size,
+                    num_branches=num_branches,
+                    prefix_pad_masks=prefix_pad_masks,
+                    prefix_att_masks=prefix_att_masks,
+                    suffix_pad_masks=single_suffix_pad_masks,
+                    suffix_att_masks=single_suffix_att_masks,
+                ))
+            att_2d_masks_4d = self._prepare_attention_masks_4d(attention_masks)
+
+            suffix_out, _ = self.forward_model(
+                inputs_embeds=[prefix_embs, suffix_embs],
+                attention_masks=att_2d_masks_4d,
+                position_ids=position_ids,
+                past_key_values=past_key_values,
+                use_cache=use_cache,
+                fill_kv_cache=fill_kv_cache,
+                adarms_cond=[None, adarms_cond],
+                time=time_flat)
+            suffix_out = suffix_out.view(batch_size, num_branches, -1,
+                                         suffix_out.shape[-1])[:, :, -self.n_action_steps:]
+            suffix_out = suffix_out.reshape(batch_size * num_branches,
+                                            self.n_action_steps, -1)
+            suffix_out = suffix_out.to(dtype=torch.float32)
+            v_t = self.action_out_proj(suffix_out)
+            if self.ori_action_dim is not None:
+                v_t = v_t[:, :, :self.ori_action_dim]
+                u_t = u_t[:, :, :self.ori_action_dim]
+
+            losses = F.mse_loss(u_t, v_t, reduction='none')
+            if action_masks_flat is not None:
+                losses = losses * action_masks_flat.unsqueeze(-1)
+                denom = (
+                    action_masks_flat.to(losses.dtype) *
+                    branch_weights.unsqueeze(-1)).sum()
+                denom = denom * u_t.shape[-1] + 1e-8
+            else:
+                denom = (branch_weights.sum() * losses.shape[1] *
+                         losses.shape[2] + 1e-8)
+            losses = losses * branch_weights[:, None, None]
+            loss = losses.sum() / denom
+
+            shared_predictions = v_t.view(batch_size, num_branches,
+                                          n_action_steps, -1)
+            return dict(
+                predictions=shared_predictions[:, 0],
+                shared_predictions=shared_predictions,
+                loss=loss,
+                shared_rtc_branch_count=num_branches,
+            )
+
         if noise is None:
             noise = self.sample_noise(actions.shape, actions.device)
 

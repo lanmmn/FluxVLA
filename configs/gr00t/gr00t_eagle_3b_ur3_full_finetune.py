@@ -15,7 +15,7 @@
 model = dict(
     type='LlavaVLA',
     pretrained_name_or_path=  # noqa: E251
-    './checkpoints/GR00T-N1.5-3B',
+    '/limx_embop/tos/users/liyinhao/projects/GR00T-N1.5-3B',
     vlm_backbone=dict(
         type='EagleBackbone',
         vlm_path=  # noqa: E251

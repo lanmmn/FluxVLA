@@ -42,12 +42,22 @@ model = dict(
     rtc_training_config=dict(
         enabled=True,
         max_delay=7,
+        shared_observation=False,  # PI0/PI0.5 only: evaluate all delays [0, max_delay) together
         distribution='exponential',  # 'exponential' (recommended) or 'uniform'
+        shared_observation_loss_weighting='distribution',  # 'distribution' preserves the sampled objective; 'uniform' matches VLASH-style equal weighting
         temperature=1.0,  # only used for 'exponential'; larger = flatter
     ))
 ```
 
 Mechanism: for each batch element, sample a delay `d ∈ [0, max_delay)`. The first `d` action steps are set to clean time (known no-noise states) and masked out from the loss.
+
+For `PI0 / PI0.5`, setting `shared_observation=True` switches training to a shared-observation multi-branch path:
+
+- all delays in `[0, max_delay)` are evaluated in the same forward pass,
+- image/language prefix embeddings are computed once per sample and reused across delay branches,
+- the final loss is aggregated across delay branches with either:
+  - `shared_observation_loss_weighting='distribution'` to preserve the original sampled RTC objective, or
+  - `shared_observation_loss_weighting='uniform'` to match VLASH-style equal weighting across delays.
 
 Delay distribution notes:
 

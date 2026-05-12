@@ -94,6 +94,85 @@ def make_att_2d_masks(pad_masks, att_masks):
     return att_2d_masks
 
 
+def build_shared_obs_att_2d_masks_and_position_ids(
+    prefix_pad_masks: torch.Tensor,
+    prefix_att_masks: torch.Tensor,
+    suffix_pad_masks: torch.Tensor,
+    suffix_att_masks: torch.Tensor,
+    num_offsets: int,
+    offset_mask: torch.Tensor,
+):
+    """Build 2D attention masks and position IDs for shared-observation RTC.
+
+    Prefix tokens are shared across all offset branches. Suffix tokens are
+    tiled for each offset, and cross-offset suffix attention is blocked.
+
+    Args:
+        prefix_pad_masks: [B, P]
+        prefix_att_masks: [B, P]
+        suffix_pad_masks: [B, S] for a single offset branch layout
+        suffix_att_masks: [B, S] for a single offset branch layout
+        num_offsets: Number of RTC delay branches.
+        offset_mask: [B, num_offsets] boolean validity mask.
+
+    Returns:
+        Tuple of:
+            att_2d_masks: [B, L, L]
+            position_ids: [B, L]
+    """
+    batch_size = prefix_pad_masks.shape[0]
+    prefix_length = prefix_pad_masks.shape[1]
+    suffix_length = suffix_pad_masks.shape[1]
+    total_length = prefix_length + suffix_length * num_offsets
+    device = prefix_pad_masks.device
+
+    full_pad_masks = torch.zeros(
+        batch_size, total_length, dtype=torch.bool, device=device)
+    full_att_masks = torch.zeros(
+        batch_size,
+        total_length,
+        dtype=prefix_att_masks.dtype,
+        device=device)
+
+    full_pad_masks[:, :prefix_length] = prefix_pad_masks
+    full_att_masks[:, :prefix_length] = prefix_att_masks
+
+    suffix_pad_tiled = suffix_pad_masks.unsqueeze(1).expand(
+        -1, num_offsets, -1).reshape(batch_size, -1)
+    suffix_att_tiled = suffix_att_masks.unsqueeze(1).expand(
+        -1, num_offsets, -1).reshape(batch_size, -1)
+    full_pad_masks[:, prefix_length:] = suffix_pad_tiled
+    full_att_masks[:, prefix_length:] = suffix_att_tiled
+
+    att_2d_masks = make_att_2d_masks(full_pad_masks, full_att_masks)
+
+    suffix_positions = torch.arange(num_offsets * suffix_length, device=device)
+    offset_ids = suffix_positions // suffix_length
+    same_offset = offset_ids.unsqueeze(1) == offset_ids.unsqueeze(0)
+    suffix_start = prefix_length
+    att_2d_masks[:, suffix_start:, suffix_start:] = (
+        att_2d_masks[:, suffix_start:, suffix_start:] & same_offset)
+
+    offset_validity = offset_mask.unsqueeze(2).expand(
+        -1, -1, suffix_length).reshape(batch_size, -1)
+    att_2d_masks[:, suffix_start:, :] = (
+        att_2d_masks[:, suffix_start:, :] & offset_validity.unsqueeze(2))
+    att_2d_masks[:, :, suffix_start:] = (
+        att_2d_masks[:, :, suffix_start:] & offset_validity.unsqueeze(1))
+
+    position_ids = torch.zeros(
+        batch_size, total_length, dtype=torch.long, device=device)
+    prefix_pos = torch.cumsum(prefix_pad_masks.long(), dim=1) - 1
+    position_ids[:, :prefix_length] = prefix_pos
+    last_prefix_pos = prefix_pos[:, -1]
+    suffix_pos_base = torch.cumsum(suffix_pad_masks.long(), dim=1)
+    suffix_pos_tiled = suffix_pos_base.unsqueeze(1).expand(
+        -1, num_offsets, -1).reshape(batch_size, -1)
+    position_ids[:, prefix_length:] = last_prefix_pos[:, None] + suffix_pos_tiled
+
+    return att_2d_masks, position_ids
+
+
 def resize_with_pad(img, width, height, pad_value=-1):
     # assume no-op when width height fits already
     if img.ndim != 4:
