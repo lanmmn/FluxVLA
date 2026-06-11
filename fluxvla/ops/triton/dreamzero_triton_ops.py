@@ -51,9 +51,8 @@ def _num_warps_for(block: int) -> int:
 
 
 @triton.jit
-def _adaln_modulate_kernel(x_ptr, scale_ptr, shift_ptr, out_ptr,
-                           n_rows, seq_len, D,
-                           BLOCK: tl.constexpr, eps: tl.constexpr):
+def _adaln_modulate_kernel(x_ptr, scale_ptr, shift_ptr, out_ptr, n_rows,
+                           seq_len, D, BLOCK: tl.constexpr, eps: tl.constexpr):
     """LayerNorm (no affine) then ``* (1 + scale) + shift``.
 
     x:     (n_rows, D)        n_rows = B * seq_len
@@ -73,17 +72,17 @@ def _adaln_modulate_kernel(x_ptr, scale_ptr, shift_ptr, out_ptr,
     xn = xc * tl.rsqrt(var + eps)
 
     b = row // seq_len
-    scale = tl.load(scale_ptr + b * D + cols, mask=mask, other=0.0).to(
-        tl.float32)
-    shift = tl.load(shift_ptr + b * D + cols, mask=mask, other=0.0).to(
-        tl.float32)
+    scale = tl.load(
+        scale_ptr + b * D + cols, mask=mask, other=0.0).to(tl.float32)
+    shift = tl.load(
+        shift_ptr + b * D + cols, mask=mask, other=0.0).to(tl.float32)
     out = xn * (1.0 + scale) + shift
     tl.store(out_ptr + row * D + cols, out.to(tl.bfloat16), mask=mask)
 
 
 @triton.jit
-def _rmsnorm_kernel(x_ptr, w_ptr, out_ptr, n_rows, D,
-                    BLOCK: tl.constexpr, eps: tl.constexpr):
+def _rmsnorm_kernel(x_ptr, w_ptr, out_ptr, n_rows, D, BLOCK: tl.constexpr,
+                    eps: tl.constexpr):
     """RMSNorm: ``(x * rsqrt(mean(x^2) + eps)) * weight``.
 
     x: (n_rows, D),  weight: (D,)
@@ -102,8 +101,8 @@ def _rmsnorm_kernel(x_ptr, w_ptr, out_ptr, n_rows, D,
 
 
 @triton.jit
-def _gated_residual_kernel(x_ptr, gate_ptr, y_ptr, out_ptr,
-                           n_rows, seq_len, D, BLOCK: tl.constexpr):
+def _gated_residual_kernel(x_ptr, gate_ptr, y_ptr, out_ptr, n_rows, seq_len, D,
+                           BLOCK: tl.constexpr):
     """``x + gate * y`` with gate broadcast over seq.
 
     x, y: (n_rows, D),  gate: (B, D)
@@ -140,8 +139,11 @@ def _gelu_tanh_kernel(x_ptr, out_ptr, n_elements, BLOCK: tl.constexpr):
 # Python wrappers
 # ----------------------------------------------------------------------
 
-def adaln_modulate(x: torch.Tensor, scale: torch.Tensor,
-                   shift: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+
+def adaln_modulate(x: torch.Tensor,
+                   scale: torch.Tensor,
+                   shift: torch.Tensor,
+                   eps: float = 1e-6) -> torch.Tensor:
     """Fused AdaLN modulation for Wan DiT norm1/norm2.
 
     Args:
@@ -160,12 +162,21 @@ def adaln_modulate(x: torch.Tensor, scale: torch.Tensor,
     out = torch.empty_like(x2, dtype=torch.bfloat16)
     block = _next_pow2(D)
     _adaln_modulate_kernel[(B * L, )](
-        x2, scale2, shift2, out, B * L, L, D,
-        BLOCK=block, eps=eps, num_warps=_num_warps_for(block))
+        x2,
+        scale2,
+        shift2,
+        out,
+        B * L,
+        L,
+        D,
+        BLOCK=block,
+        eps=eps,
+        num_warps=_num_warps_for(block))
     return out.view(B, L, D)
 
 
-def rmsnorm(x: torch.Tensor, weight: torch.Tensor,
+def rmsnorm(x: torch.Tensor,
+            weight: torch.Tensor,
             eps: float = 1e-6) -> torch.Tensor:
     """Fused RMSNorm for Wan DiT norm_q/norm_k.
 
@@ -182,8 +193,14 @@ def rmsnorm(x: torch.Tensor, weight: torch.Tensor,
     out = torch.empty_like(x2, dtype=torch.bfloat16)
     block = _next_pow2(D)
     _rmsnorm_kernel[(B * L, )](
-        x2, weight.contiguous(), out, B * L, D,
-        BLOCK=block, eps=eps, num_warps=_num_warps_for(block))
+        x2,
+        weight.contiguous(),
+        out,
+        B * L,
+        D,
+        BLOCK=block,
+        eps=eps,
+        num_warps=_num_warps_for(block))
     return out.view(B, L, D)
 
 
@@ -206,8 +223,15 @@ def gated_residual(x: torch.Tensor, gate: torch.Tensor,
     out = torch.empty_like(x2, dtype=torch.bfloat16)
     block = _next_pow2(D)
     _gated_residual_kernel[(B * L, )](
-        x2, gate2, y2, out, B * L, L, D,
-        BLOCK=block, num_warps=_num_warps_for(block))
+        x2,
+        gate2,
+        y2,
+        out,
+        B * L,
+        L,
+        D,
+        BLOCK=block,
+        num_warps=_num_warps_for(block))
     return out.view(B, L, D)
 
 

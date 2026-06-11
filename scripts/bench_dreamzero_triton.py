@@ -32,8 +32,8 @@ import torch.nn.functional as F
 # Load the kernel module directly by path to avoid triggering the heavy
 # ``fluxvla.ops`` package __init__ (which JIT-builds CUDA C++ extensions).
 _KERNELS_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    'fluxvla', 'ops', 'triton', 'dreamzero_triton_ops.py')
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'fluxvla',
+    'ops', 'triton', 'dreamzero_triton_ops.py')
 _spec = importlib.util.spec_from_file_location('dreamzero_triton_ops',
                                                _KERNELS_PATH)
 _mod = importlib.util.module_from_spec(_spec)
@@ -76,6 +76,7 @@ def _time(fn) -> float:
 
 
 # ---------------- eager references (match Wan DiT) ----------------
+
 
 def eager_adaln_modulate(x, scale, shift, eps):
     n = F.layer_norm(x, (x.shape[-1], ), eps=eps)
@@ -143,35 +144,29 @@ def main():
     totals = [0.0, 0.0]
 
     t, e = bench_op(
-        'adaln_modulate',
-        lambda: adaln_modulate(x, scale, shift, args.eps),
+        'adaln_modulate', lambda: adaln_modulate(x, scale, shift, args.eps),
         lambda: eager_adaln_modulate(x, scale, shift, args.eps),
-        lambda: eager_adaln_modulate(x.float(), scale.float(),
-                                     shift.float(), args.eps))
+        lambda: eager_adaln_modulate(x.float(), scale.float(), shift.float(),
+                                     args.eps))
     totals[0] += t * 2  # norm1 + norm2 per block
     totals[1] += e * 2
 
-    t, e = bench_op(
-        'rmsnorm (q/k)',
-        lambda: rmsnorm(x, w, args.eps),
-        lambda: eager_rmsnorm(x, w, args.eps),
-        lambda: eager_rmsnorm(x.float(), w.float(), args.eps))
+    t, e = bench_op('rmsnorm (q/k)', lambda: rmsnorm(x, w, args.eps),
+                    lambda: eager_rmsnorm(x, w, args.eps),
+                    lambda: eager_rmsnorm(x.float(), w.float(), args.eps))
     totals[0] += t * 2  # norm_q + norm_k per block
     totals[1] += e * 2
 
     t, e = bench_op(
-        'gated_residual',
-        lambda: gated_residual(x, gate, y),
+        'gated_residual', lambda: gated_residual(x, gate, y),
         lambda: eager_gated_residual(x, gate, y),
         lambda: eager_gated_residual(x.float(), gate.float(), y.float()))
     totals[0] += t * 2  # gate_msa + gate_mlp per block
     totals[1] += e * 2
 
-    t, e = bench_op(
-        'gelu_tanh (ffn)',
-        lambda: gelu_tanh(x_ffn),
-        lambda: eager_gelu_tanh(x_ffn),
-        lambda: eager_gelu_tanh(x_ffn.float()))
+    t, e = bench_op('gelu_tanh (ffn)', lambda: gelu_tanh(x_ffn),
+                    lambda: eager_gelu_tanh(x_ffn),
+                    lambda: eager_gelu_tanh(x_ffn.float()))
     totals[0] += t  # 1 GELU per block
     totals[1] += e
 
