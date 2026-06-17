@@ -13,6 +13,7 @@ current_transforms = [
     dict(
         type='DecodeLeRobotVideoSequence',
         video_keys=['observation.images.cam_high'],
+        # backend='pyav' # or torchcodec
     ),
     dict(
         type='ResizeImages',

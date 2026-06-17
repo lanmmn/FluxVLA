@@ -25,7 +25,7 @@ import torchvision
 from PIL import Image
 
 from fluxvla.datasets.utils.video_decode import (
-    build_lerobot_video_path, decode_video_frames_torchvision)
+    build_lerobot_video_path, decode_video_frames)
 from fluxvla.engines import TRANSFORMS
 from fluxvla.engines.utils.eval_utils import crop_and_resize
 from .utils import pad_to_dim, parse_image
@@ -114,13 +114,15 @@ class ProcessParquetInputs():
                  name_mappings: Dict = None,
                  embodiment_id: int = None,
                  embodiment_dim: int = None,
-                 num_padding_imgs: int = 0):
+                 num_padding_imgs: int = 0,
+                 video_backend: str = 'pyav'):
         self.parquet_keys = parquet_keys
         self.video_keys = video_keys
         self.name_mappings = name_mappings
         self.embodiment_id = embodiment_id
         self.embodiment_dim = embodiment_dim
         self.num_padding_imgs = num_padding_imgs
+        self.video_backend = video_backend
 
     def decode_video_frames_torchvision(
         self,
@@ -263,8 +265,8 @@ class ProcessParquetInputs():
                 video_path), f'Video file not found: {video_path}'
             # Load all requested timestamps at once (supports temporal window)
             unique_ts = sorted(set(timestamps))
-            frames_tensor = self.decode_video_frames_torchvision(
-                video_path, unique_ts, 0.1)
+            frames_tensor = decode_video_frames(
+                video_path, unique_ts, tolerance_s=0.1, backend=self.video_backend)
             ts_to_frame = {
                 ts: frames_tensor[i]
                 for i, ts in enumerate(unique_ts)
@@ -474,7 +476,7 @@ class DecodeLeRobotVideoSequence():
                 episode_index,
                 video_key,
             )
-            frames = decode_video_frames_torchvision(
+            frames = decode_video_frames(
                 video_path,
                 timestamps,
                 tolerance_s=self.tolerance_s,
