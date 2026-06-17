@@ -24,8 +24,8 @@ import torch
 import torchvision
 from PIL import Image
 
-from fluxvla.datasets.utils.video_decode import (
-    build_lerobot_video_path, decode_video_frames)
+from fluxvla.datasets.utils.video_decode import (build_lerobot_video_path,
+                                                 decode_video_frames)
 from fluxvla.engines import TRANSFORMS
 from fluxvla.engines.utils.eval_utils import crop_and_resize
 from .utils import pad_to_dim, parse_image
@@ -266,7 +266,10 @@ class ProcessParquetInputs():
             # Load all requested timestamps at once (supports temporal window)
             unique_ts = sorted(set(timestamps))
             frames_tensor = decode_video_frames(
-                video_path, unique_ts, tolerance_s=0.1, backend=self.video_backend)
+                video_path,
+                unique_ts,
+                tolerance_s=0.1,
+                backend=self.video_backend)
             ts_to_frame = {
                 ts: frames_tensor[i]
                 for i, ts in enumerate(unique_ts)

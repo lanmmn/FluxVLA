@@ -65,6 +65,7 @@ def build_lerobot_video_path(
         str(data_root_path),
         str(video_root_path).format(**format_kwargs))
 
+
 def decode_video_frames(
     video_path: Union[Path, str],
     timestamps: List[float],
@@ -72,9 +73,12 @@ def decode_video_frames(
     backend: str = 'pyav',
 ) -> torch.Tensor:
     if backend == 'torchcodec':
-        return decode_video_frames_torchcodec(video_path, timestamps, tolerance_s)
-    return decode_video_frames_torchvision(video_path, timestamps, tolerance_s, backend)
-    
+        return decode_video_frames_torchcodec(video_path, timestamps,
+                                              tolerance_s)
+    return decode_video_frames_torchvision(video_path, timestamps, tolerance_s,
+                                           backend)
+
+
 def decode_video_frames_torchvision(
     video_path: Union[Path, str],
     timestamps: List[float],
@@ -129,6 +133,7 @@ def decode_video_frames_torchvision(
             f'Failed to find frames within tolerance for {video_path}')
     return matched_frames
 
+
 def decode_video_frames_torchcodec(video_path, timestamps, tolerance_s=0.1):
     from torchcodec.decoders import VideoDecoder
     decoder = VideoDecoder(str(video_path))
@@ -138,10 +143,10 @@ def decode_video_frames_torchcodec(video_path, timestamps, tolerance_s=0.1):
     decoded_ts = batch.pts_seconds.to(dtype=torch.float64)
     if not (torch.abs(decoded_ts - query_ts) <= tolerance_s).all():
         raise ValueError(
-            f'Failed to find frames within tolerance for {video_path}'
-        )
+            f'Failed to find frames within tolerance for {video_path}')
 
     return batch.data
+
 
 def make_lerobot_video_context(
     data_root_path: Union[str, Path],

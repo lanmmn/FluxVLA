@@ -1,5 +1,5 @@
-import time
 import statistics
+import time
 from pathlib import Path
 
 import torch
@@ -7,9 +7,8 @@ import torchvision
 from torchcodec.decoders import VideoDecoder
 
 videos = sorted(
-    Path("datasets/SARM_manual_test_10Episodes_lerobotv3.0")
-    .glob("videos/*/chunk-000/*.mp4")
-)[:40]
+    Path("datasets/SARM_manual_test_10Episodes_lerobotv3.0").glob(
+        "videos/*/chunk-000/*.mp4"))[:40]
 
 print("videos", len(videos))
 print("first", videos[0] if videos else None)
@@ -41,7 +40,8 @@ def decode_tv_pyav(video_path, timestamps, tolerance_s=0.1):
     min_dist, argmin = dist.min(1)
 
     if not (min_dist <= tolerance_s).all():
-        raise RuntimeError(f"tolerance miss {min_dist.max().item()} for {video_path}")
+        raise RuntimeError(
+            f"tolerance miss {min_dist.max().item()} for {video_path}")
 
     return torch.stack([loaded_frames[int(idx)] for idx in argmin])
 
@@ -49,7 +49,8 @@ def decode_tv_pyav(video_path, timestamps, tolerance_s=0.1):
 def decode_torchcodec_fresh(video_path, timestamps):
     decoder = VideoDecoder(str(video_path))
     if len(timestamps) == 1:
-        return decoder.get_frame_played_at(float(timestamps[0])).data.unsqueeze(0)
+        return decoder.get_frame_played_at(float(
+            timestamps[0])).data.unsqueeze(0)
     # breakpoint()
     return decoder.get_frames_played_at([float(t) for t in timestamps]).data
 
@@ -67,14 +68,14 @@ def bench(name, decode_fn, timestamps, rounds=3):
         durations.append(time.perf_counter() - start)
 
     mean = statistics.mean(durations)
-    print(f"{name}: rounds={rounds} videos/round={len(videos)} frames/round={len(videos) * len(timestamps)}")
-    print(f"  times_s={[round(x, 4) for x in durations]}")
     print(
-        f"  mean_s={mean:.4f} "
-        f"videos_per_s={len(videos) / mean:.2f} "
-        f"frames_per_s={(len(videos) * len(timestamps)) / mean:.2f} "
-        f"ms_per_video={mean / len(videos) * 1000:.2f}"
+        f"{name}: rounds={rounds} videos/round={len(videos)} frames/round={len(videos) * len(timestamps)}"
     )
+    print(f"  times_s={[round(x, 4) for x in durations]}")
+    print(f"  mean_s={mean:.4f} "
+          f"videos_per_s={len(videos) / mean:.2f} "
+          f"frames_per_s={(len(videos) * len(timestamps)) / mean:.2f} "
+          f"ms_per_video={mean / len(videos) * 1000:.2f}")
 
 
 single = [0.0]

@@ -145,8 +145,7 @@ train_dataloader = dict(
                         'observation.state': ['states'],
                         'actions': ['actions']
                     },
-                    video_backend='torchcodec'
-                    ),
+                    video_backend='torchcodec'),
                 dict(type='ParquetPrompter', use_conversation=False),
                 dict(
                     type='ProcessPrompts',
