@@ -14,12 +14,79 @@
 """Shared LeRobot video path resolution and torchvision decoding."""
 
 from __future__ import annotations
+from collections import OrderedDict
 import os
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Union
 
 import torch
 import torchvision
+
+
+_DEFAULT_TORCHCODEC_CACHE_SIZE = 128
+_TORCHCODEC_DECODER_CACHE: OrderedDict[str, object] = OrderedDict()
+_TORCHCODEC_DECODER_CACHE_STATS: Dict[str, int] = {
+    'hits': 0,
+    'misses': 0,
+    'evictions': 0,
+    'disabled': 0,
+}
+
+
+def _get_torchcodec_cache_size() -> int:
+    raw_size = os.environ.get('TORCHCODEC_DECODER_CACHE_SIZE')
+    if raw_size is None:
+        return _DEFAULT_TORCHCODEC_CACHE_SIZE
+    try:
+        return max(0, int(raw_size))
+    except ValueError:
+        return _DEFAULT_TORCHCODEC_CACHE_SIZE
+
+
+def _evict_torchcodec_lru_if_needed(max_cache_size: int) -> None:
+    while len(_TORCHCODEC_DECODER_CACHE) > max_cache_size:
+        _TORCHCODEC_DECODER_CACHE.popitem(last=False)
+        _TORCHCODEC_DECODER_CACHE_STATS['evictions'] += 1
+
+
+def _get_torchcodec_decoder(video_path: Union[Path, str]):
+    from torchcodec.decoders import VideoDecoder
+
+    normalized_path = str(video_path)
+    max_cache_size = _get_torchcodec_cache_size()
+
+    if max_cache_size <= 0:
+        _TORCHCODEC_DECODER_CACHE_STATS['disabled'] += 1
+        return VideoDecoder(normalized_path)
+
+    decoder = _TORCHCODEC_DECODER_CACHE.get(normalized_path)
+    if decoder is not None:
+        _TORCHCODEC_DECODER_CACHE_STATS['hits'] += 1
+        _TORCHCODEC_DECODER_CACHE.move_to_end(normalized_path)
+        return decoder
+
+    _TORCHCODEC_DECODER_CACHE_STATS['misses'] += 1
+    decoder = VideoDecoder(normalized_path)
+    _TORCHCODEC_DECODER_CACHE[normalized_path] = decoder
+    _evict_torchcodec_lru_if_needed(max_cache_size)
+    return decoder
+
+
+def clear_torchcodec_decoder_cache() -> None:
+    """Clear worker-local torchcodec decoder cache."""
+    _TORCHCODEC_DECODER_CACHE.clear()
+
+
+def reset_torchcodec_decoder_cache_stats() -> None:
+    for stat_name in _TORCHCODEC_DECODER_CACHE_STATS:
+        _TORCHCODEC_DECODER_CACHE_STATS[stat_name] = 0
+
+
+def get_torchcodec_decoder_cache_stats() -> Dict[str, int]:
+    stats = dict(_TORCHCODEC_DECODER_CACHE_STATS)
+    stats['entries'] = len(_TORCHCODEC_DECODER_CACHE)
+    stats['max_size'] = _get_torchcodec_cache_size()
+    return stats
 
 
 def build_lerobot_video_path(
@@ -135,15 +202,22 @@ def decode_video_frames_torchvision(
 
 
 def decode_video_frames_torchcodec(video_path, timestamps, tolerance_s=0.1):
-    from torchcodec.decoders import VideoDecoder
-    decoder = VideoDecoder(str(video_path))
-    batch = decoder.get_frames_played_at([float(ts) for ts in timestamps])
+    normalized_path = str(video_path)
+
+    decoder = _get_torchcodec_decoder(normalized_path)
+    try:
+        batch = decoder.get_frames_played_at([float(ts) for ts in timestamps])
+    except Exception:
+        # Decoder state may become invalid after transient I/O/codec failures.
+        _TORCHCODEC_DECODER_CACHE.pop(normalized_path, None)
+        decoder = _get_torchcodec_decoder(normalized_path)
+        batch = decoder.get_frames_played_at([float(ts) for ts in timestamps])
 
     query_ts = torch.tensor(timestamps, dtype=torch.float64)
     decoded_ts = batch.pts_seconds.to(dtype=torch.float64)
     if not (torch.abs(decoded_ts - query_ts) <= tolerance_s).all():
         raise ValueError(
-            f'Failed to find frames within tolerance for {video_path}')
+            f'Failed to find frames within tolerance for {normalized_path}')
 
     return batch.data
 
