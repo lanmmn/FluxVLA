@@ -14,14 +14,13 @@
 """Shared LeRobot video path resolution and torchvision decoding."""
 
 from __future__ import annotations
-from collections import OrderedDict
 import os
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Union
 
 import torch
 import torchvision
-
 
 _DEFAULT_TORCHCODEC_CACHE_SIZE = 128
 _TORCHCODEC_DECODER_CACHE: OrderedDict[str, object] = OrderedDict()
