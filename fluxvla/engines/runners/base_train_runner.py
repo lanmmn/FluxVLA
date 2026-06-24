@@ -25,6 +25,7 @@ from typing import Dict, Optional
 import torch
 import torch.distributed as dist
 from safetensors.torch import save_file
+from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers.modeling_outputs import CausalLMOutputWithPast
@@ -32,8 +33,10 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from fluxvla.engines.utils import check_bloat16_supported
 from fluxvla.engines.utils.name_map import str_to_dtype
 from fluxvla.engines.utils.torch_utils import worker_init_function
-from ..utils import (build_evaluator_from_cfg, build_lr_scheduler_from_cfg,
-                     build_tokenizer_from_cfg, initialize_overwatch)
+from fluxvla.optimizers.schedulers import (get_constant_schedule,
+                                           get_cosine_schedule_with_warmup,
+                                           get_step_based_schedule)
+from ..utils import build_tokenizer_from_cfg, initialize_overwatch
 
 overwatch = initialize_overwatch(__name__)
 
@@ -57,8 +60,10 @@ class BaseTrainRunner(ABC):
             based on epochs. Defaults to 10000.
         max_keep_ckpts (int, optional): Maximum number of checkpoints to keep.
             Defaults to 2.
-        lr_scheduler (Dict): Learning rate scheduler policy configuration.
-        betas (tuple, optional): AdamW beta values. Defaults to (0.9, 0.999).
+        lr_scheduler_type (str, optional): Type of learning rate scheduler.
+            Defaults to 'constant'.
+        warmup_ratio (int, optional): Warm-up ratio for learning rate
+            scheduler. Defaults to 0.
         enable_gradient_checkpointing (bool, optional): Enable gradient
             checkpointing. Defaults to True.
         enable_mixed_precision_training (bool, optional): Enable mixed
@@ -83,8 +88,9 @@ class BaseTrainRunner(ABC):
                  save_epoch_interval: int = 1,
                  save_iter_interval: int = 10000,
                  max_keep_ckpts: int = 2,
-                 lr_scheduler: Dict = None,
-                 betas: tuple = (0.9, 0.999),
+                 lr_scheduler_type: str = 'constant',
+                 lr_schedule: Optional[Dict[float, float]] = None,
+                 warmup_ratio: int = 0,
                  enable_gradient_checkpointing: bool = True,
                  enable_mixed_precision_training: bool = True,
                  reduce_in_full_precision: bool = True,
@@ -136,8 +142,8 @@ class BaseTrainRunner(ABC):
         self.save_iter_interval = save_iter_interval
         self.save_epoch_interval = save_epoch_interval
         self.max_keep_ckpts = max_keep_ckpts
-        self.lr_scheduler_cfg = lr_scheduler
-        self.betas = tuple(float(b) for b in betas)
+        self.lr_scheduler_type = lr_scheduler_type
+        self.warmup_ratio = warmup_ratio
         self.enable_gradient_checkpointing = enable_gradient_checkpointing
         self.enable_mixed_precision_training = enable_mixed_precision_training
         self.reduce_in_full_precision = reduce_in_full_precision
@@ -170,8 +176,8 @@ class BaseTrainRunner(ABC):
         self.resume_from = resume_from
         # Track if optimizer state was successfully loaded
         self.optimizer_state_loaded = False
-        self.weight_decay = None
-        self.num_training_steps = None
+        # Store lr_schedule for step-based scheduler
+        self.lr_schedule = lr_schedule
         self._active_dataloader = None
 
         # Lightweight Validation
@@ -460,16 +466,6 @@ class BaseTrainRunner(ABC):
             return math.ceil(dataset_len / self.global_batch_size)
 
     @staticmethod
-    def _build_dataloader_generator() -> Optional[torch.Generator]:
-        seed = os.environ.get('EXPERIMENT_GLOBAL_SEED')
-        if seed is None:
-            return None
-
-        generator = torch.Generator()
-        generator.manual_seed(int(seed) + overwatch.rank())
-        return generator
-
-    @staticmethod
     def _tensor_for_safetensors(tensor):
         """Return a contiguous tensor for safetensors export."""
         if isinstance(tensor, torch.Tensor) and not tensor.is_contiguous():
@@ -516,36 +512,156 @@ class BaseTrainRunner(ABC):
                     overwatch.warning(
                         f'Failed to remove checkpoint {old_ckpt}: {e}')
 
-    def _resolve_lr_scheduler_cfg(self) -> Dict:
-        if self.lr_scheduler_cfg is None:
-            raise ValueError('runner.lr_scheduler must be provided.')
-        return dict(self.lr_scheduler_cfg)
-
     def _setup_optimizer_and_scheduler(
         self,
         n_train_examples: int,
         weight_decay: Optional[float] = None,
+        lr_schedule: Optional[Dict[float, float]] = None,
     ) -> None:
-        """Setup optimizer and learning rate scheduler policy."""
-        self.weight_decay = weight_decay
+        """Setup optimizer and learning rate scheduler.
+
+        This method handles the creation of optimizer and scheduler based on
+        the configured lr_scheduler_type. It supports parameter grouping
+        with weight decay when weight_decay is provided.
+
+        Args:
+            n_train_examples: Number of training examples.
+            weight_decay: Weight decay value for optimizer. If provided, will
+                create parameter groups (decay/no_decay). If None, uses
+                simple parameter list.
+            lr_schedule: Dictionary mapping ratio (0-1) to learning rate for
+                step-based scheduler. Required when lr_scheduler_type is
+                'step-based'.
+        """
+        # Calculate number of training steps
         n_train_examples = math.ceil(
             n_train_examples / self.global_batch_size) * self.global_batch_size
         if self.max_steps is None:
-            self.num_training_steps = (
-                n_train_examples * self.max_epochs) // self.global_batch_size
+            num_training_steps = (n_train_examples *
+                                  self.max_epochs) // self.global_batch_size
         else:
-            self.num_training_steps = self.max_steps
+            num_training_steps = self.max_steps
 
-        scheduler_cfg = self._resolve_lr_scheduler_cfg()
-        self.lr_scheduler = build_lr_scheduler_from_cfg(scheduler_cfg)
-        self.lr_scheduler_policy_type = scheduler_cfg['type']
-        self.optimizer, self.lr_scheduler = self.lr_scheduler.build(
-            self, weight_decay)
+        if self.lr_scheduler_type == 'linear-warmup+cosine-decay':
+            # Set warm-up steps (floor) based on `warmup_ratio`
+            # (should be 0.03 - 0.05)
+            num_warmup_steps = int(num_training_steps * self.warmup_ratio)
 
-    def _get_log_lr(self) -> float:
-        if hasattr(self.lr_scheduler, 'get_log_lr'):
-            return self.lr_scheduler.get_log_lr(self)
-        return self.lr_scheduler.get_last_lr()[0]
+            # Create Parameter Groups --> bias terms, normalization
+            # layer parameters shouldn't be decayed!
+            if weight_decay is not None:
+                decay, no_decay = [], []
+                for name, param in self.vla.named_parameters():
+                    if not param.requires_grad:
+                        continue
+
+                    # Check on any parameters with fewer than 2 dimensions
+                    # or with "bias" in the name
+                    if param.ndim <= 1 or name.endswith('.bias'):
+                        no_decay.append(param)
+                    else:
+                        decay.append(param)
+
+                # Build Parameter Groups
+                groups = [{
+                    'params': decay,
+                    'weight_decay': weight_decay
+                }, {
+                    'params': no_decay,
+                    'weight_decay': 0.0
+                }]
+            else:
+                # Simple parameter list
+                groups = [
+                    param for param in self.vla.parameters()
+                    if param.requires_grad
+                ]
+
+            # Create Optimizer & LR Scheduler
+            self.optimizer = AdamW(groups, lr=self.learning_rate)
+            self.lr_scheduler = get_cosine_schedule_with_warmup(
+                self.optimizer, num_warmup_steps, num_training_steps)
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = 0.0
+
+        elif self.lr_scheduler_type == 'constant':
+            # Create Parameter Groups --> bias terms, normalization
+            # layer parameters shouldn't be decayed!
+            if weight_decay is not None:
+                decay, no_decay = [], []
+                for name, param in self.vla.named_parameters():
+                    if not param.requires_grad:
+                        continue
+
+                    # Check on any parameters with fewer than 2 dimensions
+                    # or with "bias" in the name
+                    if param.ndim <= 1 or name.endswith('.bias'):
+                        no_decay.append(param)
+                    else:
+                        decay.append(param)
+
+                # Build Parameter Groups
+                groups = [{
+                    'params': decay,
+                    'weight_decay': weight_decay
+                }, {
+                    'params': no_decay,
+                    'weight_decay': 0.0
+                }]
+            else:
+                # Simple parameter list
+                groups = [
+                    param for param in self.vla.parameters()
+                    if param.requires_grad
+                ]
+
+            # Create Optimizer & LR Scheduler
+            self.optimizer = AdamW(groups, lr=self.learning_rate)
+            self.lr_scheduler = get_constant_schedule(self.optimizer)
+
+        elif self.lr_scheduler_type == 'step-based':
+            if lr_schedule is None:
+                raise ValueError('lr_schedule must be provided when using '
+                                 'step-based scheduler')
+
+            # Create Parameter Groups --> bias terms, normalization
+            # layer parameters shouldn't be decayed!
+            if weight_decay is not None:
+                decay, no_decay = [], []
+                for name, param in self.vla.named_parameters():
+                    if not param.requires_grad:
+                        continue
+
+                    # Check on any parameters with fewer than 2 dimensions
+                    # or with "bias" in the name
+                    if param.ndim <= 1 or name.endswith('.bias'):
+                        no_decay.append(param)
+                    else:
+                        decay.append(param)
+
+                # Build Parameter Groups
+                groups = [{
+                    'params': decay,
+                    'weight_decay': weight_decay
+                }, {
+                    'params': no_decay,
+                    'weight_decay': 0.0
+                }]
+            else:
+                # Simple parameter list
+                groups = [
+                    param for param in self.vla.parameters()
+                    if param.requires_grad
+                ]
+
+            # Create Optimizer & Step-based LR Scheduler
+            self.optimizer = AdamW(groups, lr=self.learning_rate)
+            self.lr_scheduler = get_step_based_schedule(
+                self.optimizer, num_training_steps, lr_schedule)
+
+        else:
+            raise ValueError(f'Learning Rate Schedule with type '
+                             f"'{self.lr_scheduler_type}' is not supported!")
 
     def run(self, vla_dataset, eval_dataset=None) -> None:
         """Train the VLA model."""
@@ -567,7 +683,6 @@ class BaseTrainRunner(ABC):
             collate_fn=self.collator,
             num_workers=self.per_device_num_workers,
             worker_init_fn=worker_init_function,
-            generator=self._build_dataloader_generator(),
             pin_memory=True,
             prefetch_factor=2 if use_workers else None,
             persistent_workers=use_workers)
@@ -666,7 +781,7 @@ class BaseTrainRunner(ABC):
                 self.metric.commit(
                     global_step=self.metric.global_step + 1,
                     epoch=self.current_epoch,
-                    lr=self._get_log_lr())
+                    lr=self.lr_scheduler.get_last_lr()[0])
                 progress.set_description(self.metric.push(), refresh=False)
                 progress.update()
                 if (self.evaluator is not None
@@ -729,7 +844,7 @@ class BaseTrainRunner(ABC):
                         self.metric.commit(
                             global_step=self.metric.global_step + 1,
                             epoch=self.current_epoch,
-                            lr=self._get_log_lr())
+                            lr=self.lr_scheduler.get_last_lr()[0])
                         iter_pbar.set_description(self.metric.push())
                         iter_pbar.update()
                         if (self.evaluator is not None
@@ -807,7 +922,6 @@ class BaseTrainRunner(ABC):
 
     def _training_step(self, batch, should_step: bool = True) -> torch.Tensor:
         """Execute single training step: forward, backward, optimize."""
-        self.lr_scheduler.prepare_step(self)
         batch = self._prepare_batch(
             batch, self.device_id, self.mixed_precision_dtype
             if self.enable_mixed_precision_training else None)
@@ -849,7 +963,7 @@ class BaseTrainRunner(ABC):
                 self.optimizer.step()
             else:
                 raise
-        self.lr_scheduler.step(self)
+        self.lr_scheduler.step()
         self.optimizer.zero_grad()
 
         # Custom hook for subclasses
@@ -864,14 +978,14 @@ class BaseTrainRunner(ABC):
         """Reinitialize optimizer on state mismatch."""
         if overwatch.is_rank_zero():
             overwatch.warning('Optimizer state mismatch. Reinitializing.')
-        last_lrs = self.lr_scheduler.get_last_lr()
-        self.optimizer = self.lr_scheduler.build_optimizer(
-            self, self.weight_decay)
-        for group, lr in zip(self.optimizer.param_groups, last_lrs):
-            group['lr'] = lr
-        self.lr_scheduler.bind_optimizer(self.optimizer)
-        self.lr_scheduler.prepare_step(self)
+        trainable_params = [
+            p for p in self.vla.parameters() if p.requires_grad
+        ]
+        current_lr = self.optimizer.param_groups[0]['lr']
+        self.optimizer = torch.optim.AdamW(trainable_params, lr=current_lr)
         self.optimizer_state_loaded = False
+        if self.lr_scheduler and hasattr(self.lr_scheduler, 'optimizer'):
+            self.lr_scheduler.optimizer = self.optimizer
 
     def _save_and_sync(self, loss_value: float = None):
         """Save checkpoint and synchronize.

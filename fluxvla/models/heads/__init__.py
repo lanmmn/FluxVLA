@@ -13,13 +13,31 @@
 # limitations under the License.
 
 from .flow_matching_head import FlowMatchingHead  # noqa: F401, F403
-from .flow_matching_inference_head import \
-    FlowMatchingInferenceHead  # noqa: F401, F403
+
+
+def _is_optional_torch_distributed_error(exc: ImportError) -> bool:
+    name = getattr(exc, 'name', '') or ''
+    message = str(exc)
+    return (name.startswith('torch.distributed')
+            or name.startswith('torch._C._distributed_c10d')
+            or 'torch._C._distributed_c10d' in message)
+
+
+try:
+    from .flow_matching_inference_head import \
+        FlowMatchingInferenceHead  # noqa: F401, F403
+except ImportError:
+    pass
 from .llava_action_head import LlavaActionHead  # noqa: F401, F403
 from .openvla_head import OpenVLAHead  # noqa: F401, F403
-from .xvla_head import XVLAFlowMatchingHead  # noqa: F401, F403
+try:
+    from .xvla_head import XVLAFlowMatchingHead  # noqa: F401, F403
+except ImportError as exc:
+    if not _is_optional_torch_distributed_error(exc):
+        raise
 
 try:
     from .dreamzero_head import DreamZeroHead  # noqa: F401
-except ImportError:
-    pass
+except ImportError as exc:
+    if not _is_optional_torch_distributed_error(exc):
+        raise

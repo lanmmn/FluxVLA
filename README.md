@@ -28,14 +28,14 @@ FluxVLA Engine is a full-stack, end-to-end engineering platform for deploying em
 
 ## Performance
 
-| Codebase                    |                                                     Libero-Spatial                                                      |                                                      Libero-Object                                                      |                                                      Libero-Goal                                                      |                                                     Libero-Long                                                     | Libero-Average |
-| --------------------------- | :---------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------: | :------------: |
-| FluxVLA(SmolVLA)            |      [86.2](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/smolvla_libero_spatial_full_finetune_bs64)      |      [92.4](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/smolvla_libero_object_full_finetune_bs64)       |      [91.4](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/smolvla_libero_goal_full_finetune_bs64)       |      [68.8](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/smolvla_libero_10_full_finetune_bs64)       |      84.7      |
-| FluxVLA(GR00T)              |  [97.4](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/gr00t_eagle_3b_libero_spatial_full_finetune_bs64)   |   [96.2](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/gr00t_eagle_3b_libero_object_full_finetune_bs64)   |   [94.6](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/gr00t_eagle_3b_libero_goal_full_finetune_bs64)   | [93.0±1.5](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/gr00t_eagle_3b_libero_10_full_finetune_bs64) |      95.3      |
-| FluxVLA(Qwen3VL 0.6B+GR00T) | [96.0](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/gr00t_qwen3vl_0.6b_libero_object_full_finetune_bs64) | [99.4](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/gr00t_qwen3vl_0.6b_libero_object_full_finetune_bs64) | [95.2](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/gr00t_qwen3vl_0.6b_libero_goal_full_finetune_bs64) | [94.2](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/gr00t_qwen3vl_0.6b_libero_10_full_finetune_bs64) |     96.20      |
-| FluxVLA(DreamZero)          | [98.2](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/dreamzero_libero_spatial_full_finetune_w_cache_bs64) | [98.8](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/dreamzero_libero_object_full_finetune_w_cache_bs64)  | [93.2](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/dreamzero_libero_goal_full_finetune_w_cache_bs64)  | [94.8](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/dreamzero_libero_10_full_finetune_w_cache_bs64)  |     96.25      |
-| FluxVLA(PI0)                |   [98.6](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi0_paligemma_libero_spatial_full_finetune_bs64)   |   [98.8](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi0_paligemma_libero_object_full_finetune_bs64)    |   [96.8](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi0_paligemma_libero_goal_full_finetune_bs64)    |   [93.2](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi0_paligemma_libero_10_full_finetune_bs64)    |     96.85      |
-| FluxVLA(PI0.5)              |  [98.6](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi05_paligemma_libero_spatial_full_finetune_bs64)   |   [99.6](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi05_paligemma_libero_object_full_finetune_bs64)   |   [98.0](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi05_paligemma_libero_goal_full_finetune_bs64)   | [95.6±1.0](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi05_paligemma_libero_10_full_finetune_bs64) |     97.95      |
+| Codebase                    |                                                     Libero-Spatial                                                      |                                                     Libero-Object                                                      |                                                     Libero-Goal                                                      |                                                     Libero-Long                                                     | Libero-Average |
+| --------------------------- | :---------------------------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------: | :------------: |
+| FluxVLA(SmolVLA)            |      [86.2](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/smolvla_libero_spatial_full_finetune_bs64)      |      [92.4](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/smolvla_libero_object_full_finetune_bs64)      |      [91.4](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/smolvla_libero_goal_full_finetune_bs64)      |      [68.8](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/smolvla_libero_10_full_finetune_bs64)       |      84.7      |
+| FluxVLA(GR00T)              |  [97.4](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/gr00t_eagle_3b_libero_spatial_full_finetune_bs64)   |  [96.2](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/gr00t_eagle_3b_libero_object_full_finetune_bs64)   |  [94.6](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/gr00t_eagle_3b_libero_goal_full_finetune_bs64)   | [93.0±1.5](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/gr00t_eagle_3b_libero_10_full_finetune_bs64) |      95.3      |
+| FluxVLA(DreamZero)          | [98.2](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/dreamzero_libero_spatial_full_finetune_w_cache_bs64) | [98.8](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/dreamzero_libero_object_full_finetune_w_cache_bs64) | [93.2](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/dreamzero_libero_goal_full_finetune_w_cache_bs64) | [94.8](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/dreamzero_libero_10_full_finetune_w_cache_bs64)  |     96.25      |
+| FluxVLA(Qwen3VL 0.6B+GR00T) |                                                          98.6                                                           |                                                          99.6                                                          |                                                         95.6                                                         |                                                      92.2±1.8                                                       |     96.50      |
+| FluxVLA(PI0)                |   [98.6](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi0_paligemma_libero_spatial_full_finetune_bs64)   |   [98.8](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi0_paligemma_libero_object_full_finetune_bs64)   |   [96.8](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi0_paligemma_libero_goal_full_finetune_bs64)   |   [93.2](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi0_paligemma_libero_10_full_finetune_bs64)    |     96.85      |
+| FluxVLA(PI0.5)              |  [98.6](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi05_paligemma_libero_spatial_full_finetune_bs64)   |  [99.6](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi05_paligemma_libero_object_full_finetune_bs64)   |  [98.0](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi05_paligemma_libero_goal_full_finetune_bs64)   | [95.6±1.0](https://huggingface.co/limxdynamics/FluxVLAEngine/tree/main/pi05_paligemma_libero_10_full_finetune_bs64) |     97.95      |
 
 *Linked scores point to the corresponding checkpoints.*
 
@@ -54,8 +54,6 @@ FluxVLA Engine is a full-stack, end-to-end engineering platform for deploying em
 - All rates are micro-averaged over episodes.
 
 ## 📢 Latest News
-
-**\[2026/06/22\]** 🔥 A minimal Oli humanoid whole-body (loco-manipulation) real-robot inference path (operator + runner + example config) is now available. See [docs/oli_whole_body.md](docs/oli_whole_body.md).
 
 **\[2026/06/17\]** 🔥 ARM reward modeling with RA-BC/AW-BC reweighting is now supported. See [docs/arm.md](docs/arm.md) for setup and usage.
 
@@ -79,157 +77,67 @@ FluxVLA Engine is a full-stack, end-to-end engineering platform for deploying em
 
 ## 🛠️ Installation
 
-Choose one of the following installation paths:
+For the validated Jetson Orin Docker workflow, see [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md).
 
-- **Recommended one-command installer**: use this for normal training,
-  simulation evaluation, and real-robot inference setups.
-- **Update an existing FluxVLA environment**: use this if you installed an
-  earlier FluxVLA release and only need to refresh changed packages.
-- **Manual installation from scratch**: use this only when you need to control
-  every package install step yourself.
+**Orin Docker Images**
 
-### Recommended: one-command installer
+常用的 Orin 镜像（详见上文链接）：
 
-```bash
-conda create -n fluxvla python=3.10 -y
-conda activate fluxvla
+- `fluxvla:orin-base` — 最小运行时基线（Jetson L4T、PyTorch、Triton、FluxVLA 通用依赖）。
+- `fluxvla:orin-fa` — 在 `orin-base` 上增加为 SM87 预编译的 `flash-attn`，适合 attention-heavy 推理场景。
+- `fluxvla:orin-ros` — 在 `orin-base` 上增加 ROS Noetic 运行时与 Python 绑定，用于机器人集成。
+- `fluxvla:orin-ros-fa` — 集成 ROS 与 FlashAttention 的完整镜像，适合真机同时运行 ROS 节点与高性能推理。
 
-# Choose one mode: sim-only, real-only, or full.
-bash scripts/install_env.sh sim-only
-# bash scripts/install_env.sh real-only
-# bash scripts/install_env.sh full
-```
+选择建议与构建流程请参考 [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md) 中的“选择指南”与“推荐的分层构建流程”。
 
-<details>
-<summary><b>If the installer has issues: check modes and CUDA profile selection</b></summary>
-
-`sim-only` installs simulation / LIBERO / RoboCasa runtime dependencies plus
-the pinned RoboCasa source checkouts under `./src`, `real-only` installs
-real-robot and remote-inference dependencies, and `full` installs both. Pass
-`--skip-robocasa` if you do not need the RoboCasa checkouts.
-RoboCasa simulator assets are downloaded by default whenever the installer
-installs the RoboCasa source checkouts (`sim-only`, `full`, or `real-only --with-robocasa`). The installer calls `scripts/download_robocasa_assets.py`
-and uses `FLUXVLA_ROBOCASA_ASSET_ENDPOINT` (default: `HF_ENDPOINT`, then
-`https://hf-mirror.com`). Use `--skip-robocasa-assets` to skip only the assets,
-or `--skip-robocasa` to skip both the source checkouts and the assets.
-
-The installer selects a CUDA PyTorch profile automatically from the current
-CUDA toolkit / `nvcc` version first: CUDA >= 12.8 selects `cu128`, otherwise it
-selects `cu124`. If no toolkit is visible, it falls back to driver-reported
-CUDA and then GPU generation. Override it with `--profile cu128` or
-`--profile cu124`.
-
-After PyTorch is installed, the FlashAttention wheel is selected from the
-actual Python tag, PyTorch version, CUDA major version, C++ ABI, and CPU
-architecture. If your platform has no matching prebuilt wheel, set
-`FLASH_ATTN_WHEEL_URL` explicitly or pass `--skip-flash-attn`.
-
-`av` is installed from the pip wheel first by default to avoid slow conda
-dependency resolution; if no wheel is available, the installer falls back to
-conda. Set `FLUXVLA_AV_INSTALLER=conda` if you specifically want the
-conda-forge package.
-
-Real-robot runners still require the system ROS installation itself. On ROS
-Noetic machines, source ROS before launching inference:
+If `ports.ubuntu.com` or PyPI is unstable while building the Orin Docker image in mainland China, enable the bundled mirror option:
 
 ```bash
-source /opt/ros/noetic/setup.bash
+FLUXVLA_USE_CN_MIRRORS=1 docker/build_docker.sh
 ```
 
-</details>
+More Docker build, ROS image, FlashAttention, and custom mirror options are documented in [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md).
 
-<details>
-<summary><b>If the installer has issues: use a cached or mirrored FlashAttention wheel</b></summary>
+For the validated Jetson Orin Docker workflow, see [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md).
 
-FlashAttention wheels are large, so GitHub release downloads can dominate a
-fresh install on slow networks. For repeated installs, put the exact wheel file
-in `./wheelhouse/`, `./wheels/`, or `~/.cache/fluxvla/wheels/`; the installer
-will use it before any network request. You can also point at a local file or
-an internal mirror:
+**Orin Docker Images**
+
+常用的 Orin 镜像（详见上文链接）：
+
+- `fluxvla:orin-base` — 最小运行时基线（Jetson L4T、PyTorch、Triton、FluxVLA 通用依赖）。
+- `fluxvla:orin-fa` — 在 `orin-base` 上增加为 SM87 预编译的 `flash-attn`，适合 attention-heavy 推理场景。
+- `fluxvla:orin-ros` — 在 `orin-base` 上增加 ROS Noetic 运行时与 Python 绑定，用于机器人集成。
+- `fluxvla:orin-ros-fa` — 集成 ROS 与 FlashAttention 的完整镜像，适合真机同时运行 ROS 节点与高性能推理。
+
+选择建议与构建流程请参考 [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md) 中的“选择指南”与“推荐的分层构建流程”。
+
+If `ports.ubuntu.com` or PyPI is unstable while building the Orin Docker image in mainland China, enable the bundled mirror option:
 
 ```bash
-FLASH_ATTN_WHEEL_FILE=/path/to/flash_attn-2.8.3.post1+cu12torch2.8cxx11abiTRUE-cp310-cp310-linux_x86_64.whl \
-bash scripts/install_env.sh sim-only --profile cu128
-
-FLASH_ATTN_WHEEL_BASE_URLS="https://your-mirror.example.com/fluxvla/wheels" \
-bash scripts/install_env.sh sim-only --profile cu128
+FLUXVLA_USE_CN_MIRRORS=1 docker/build_docker.sh
 ```
 
-</details>
+More Docker build, ROS image, FlashAttention, and custom mirror options are documented in [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md).
 
-<details>
-<summary><b>If the installer has issues: customize pip mirrors and timeouts</b></summary>
-
-The installer respects your existing pip configuration first. If that index is
-missing a package, or if no pip index is configured, it probes PyPI plus several
-common mirrors and retries by response time instead of pinning one mirror
-globally. For slow or unstable networks, customize the candidate list and
-timeouts:
-
-```bash
-PIP_INDEX_CANDIDATES="https://mirrors.aliyun.com/pypi/simple https://mirrors.cloud.tencent.com/pypi/simple https://pypi.tuna.tsinghua.edu.cn/simple https://pypi.org/simple" \
-PIP_INSTALL_TIMEOUT=7200 \
-PIP_NETWORK_TIMEOUT=900 \
-GH_PROXY=https://ghfast.top \
-bash scripts/install_env.sh full
-```
-
-</details>
-
-### Update an existing FluxVLA environment
-
-If you already cloned and installed FluxVLA(v0.1.0), you do not need to
-recreate the conda environment. Pull the latest code and update only the
-packages whose versions changed for the current simulation / model stack:
-
-```bash
-bash scripts/update_env.sh
-```
-
-Use `--skip-pull` if you already updated the checkout yourself, and
-`--skip-project` if you do not want to reinstall FluxVLA in editable mode.
-
-<details>
-<summary><b>Equivalent manual commands</b></summary>
-
-```bash
-git pull
-python -m pip install --upgrade "transformers==5.3.0" "datasets==4.0.0"
-python -m pip install "mujoco==3.2.6" gymnasium lxml bddl==1.0.1 hydra-core==1.2.0 robomimic==0.2.0
-python -m pip install --force-reinstall --no-deps "libero @ git+https://github.com/yinchimaoliang/LIBERO.git@058fda1ddebe92918af091cb6816759ca6d003f0"
-python -m pip install --force-reinstall --no-deps "robosuite @ git+https://github.com/yinchimaoliang/robosuite.git@e293cc32ff3c48957a4ebcad09952432b0dc9049"
-python -m pip install --no-build-isolation -e .
-python -c "import transformers; print(transformers.__version__)"
-```
-
-</details>
-
-RoboCasa GR00T support is still optional. The installer manages the Isaac-GR00T
-and RoboCasa GR1 local checkouts under `./src` for `sim-only` and `full`; use
-`--skip-robocasa` if you do not use RoboCasa configs.
-
-The update helper does not reinstall PyTorch or FlashAttention. Existing
-`flash-attn==2.5.5` environments can keep using it only if it still imports
-against the installed PyTorch/CUDA build:
-
-```bash
-python - <<'PY'
-import torch, flash_attn
-from flash_attn.flash_attn_interface import flash_attn_func, flash_attn_varlen_func
-print("torch", torch.__version__, "cuda", torch.version.cuda)
-print("flash-attn", flash_attn.__version__)
-PY
-```
-
-If you upgrade PyTorch with the current installer or the commands below,
-reinstall a matching FlashAttention wheel as well. The installer currently
-defaults to `flash-attn==2.8.3.post1` for the supported PyTorch profiles.
-
-### Manual installation from scratch
-
-Use the manual path only if you are not using `scripts/install_env.sh`.
-Install PyTorch first, then FlashAttention, then the remaining FluxVLA
-dependencies.
+> **Note for existing installations**
+>
+> If you already cloned and installed FluxVLA(v0.1.0), you do not need to
+> recreate the conda environment. Pull the latest code and upgrade
+> Transformers:
+>
+> ```bash
+> git pull
+> python -m pip install --upgrade "transformers==5.3.0"
+> python -c "import transformers; print(transformers.__version__)"
+> ```
+>
+> If you also want to use RoboCasa GR00T configs, install the RoboCasa-specific
+> runtime dependencies in the same environment:
+>
+> ```bash
+> python -m pip install "mujoco==3.2.6" gymnasium lxml
+> python -m pip install "robosuite @ git+https://github.com/yinchimaoliang/robosuite.git@7264a82"
+> ```
 
 <details>
 <summary><b>1. Create a conda environment</b></summary>
@@ -258,33 +166,23 @@ For other CUDA versions, replace `cu128` with the corresponding value (e.g., `cu
 <details>
 <summary><b>3. Install flash-attention</b></summary>
 
-The one-command installer downloads a prebuilt FlashAttention wheel from the
-official release assets. For manual installation, install the wheel matching
-your Python, PyTorch, and C++ ABI instead of building from source:
+Method 1: Install directly via pip:
 
 ```bash
-PYTAG=$(python - <<'PY'
-import sys
-print(f"cp{sys.version_info.major}{sys.version_info.minor}")
-PY
-)
-ABI=$(python - <<'PY'
-import torch
-print(str(torch._C._GLIBCXX_USE_CXX11_ABI).upper())
-PY
-)
-
-pip install --no-deps \
-  "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3.post1/flash_attn-2.8.3.post1+cu12torch2.8cxx11abi${ABI}-${PYTAG}-${PYTAG}-linux_x86_64.whl"
+pip install psutil ninja packaging
+# MAX_JOBS controls the number of parallel build threads; tune it based on your machine resources
+MAX_JOBS=8 pip install flash-attn==2.5.5 --no-build-isolation --find-links https://github.com/Dao-AILab/flash-attention/releases
 ```
 
-If you installed PyTorch 2.6, replace `torch2.8` in the wheel URL with
-`torch2.6`.
+Method 2: Build from source (recommended if method 1 fails):
 
-FlashAttention wheels are tied to the installed Python, PyTorch, CUDA, and C++
-ABI. `flash-attn==2.5.5` is not forbidden, but it is only safe to keep when it
-was built for the exact PyTorch/CUDA stack you are still using. After any
-PyTorch upgrade, reinstall a matching FlashAttention wheel.
+```bash
+git clone https://github.com/Dao-AILab/flash-attention.git
+cd flash-attention
+git checkout v2.5.5
+# MAX_JOBS controls the number of parallel build threads; tune it based on your machine resources
+MAX_JOBS=8 python setup.py install
+```
 
 </details>
 
@@ -305,37 +203,35 @@ pip install -r requirements.txt
 pip install --no-build-isolation -e .
 ```
 
-> **Note**: `requirements.txt` now composes `requirements-base.txt`,
-> `requirements-sim.txt`, and `requirements-real.txt`. It does not install
-> PyTorch; install CUDA PyTorch first or use `scripts/install_env.sh`.
+> **Note**: `requirements.txt` pins `torch==2.6.0` to prevent pip from accidentally replacing the CUDA-enabled PyTorch installed in step 2. If you need to use another torch version, update both the step-2 command and the torch version in `requirements.txt`.
 
 </details>
 
 <details>
-<summary><b>Optional: RoboCasa GR00T source checkouts</b></summary>
+<summary><b>RoboCasa GR00T support (optional)</b></summary>
 
-RoboCasa GR00T configs such as `configs/gr00t/gr00t_eagle_3b_robocasa_finetune.py` require the pinned Isaac-GR00T and RoboCasa GR1 task checkouts. The one-click installer handles them for `sim-only` and `full` by default and places them under `./src`:
+Install these extra dependencies only if you want to train or evaluate RoboCasa GR00T configs such as `configs/gr00t/gr00t_eagle_3b_robocasa_finetune.py`.
 
-```bash
-bash scripts/install_env.sh sim-only
-```
-
-Use `FLUXVLA_ROBOCASA_SRC_ROOT=/path/to/src` to choose another checkout root, `--skip-robocasa` to skip these source installs, and `--with-robocasa` to force them in `real-only` mode. Runtime dependencies and the patched robosuite build are installed from `requirements-sim.txt`.
-
-If you are not using the installer, the equivalent manual commands are:
+First install the RoboCasa runtime dependencies and the patched robosuite build:
 
 ```bash
 pip install "mujoco==3.2.6" gymnasium lxml
-pip install "robosuite @ git+https://github.com/yinchimaoliang/robosuite.git@e293cc32ff3c48957a4ebcad09952432b0dc9049"
+pip install "robosuite @ git+https://github.com/yinchimaoliang/robosuite.git@7264a82"
+```
 
-git clone https://github.com/NVIDIA/Isaac-GR00T.git ./src/Isaac-GR00T
-git -C ./src/Isaac-GR00T checkout 4af2b622892f7dcb5aae5a3fb70bcb02dc217b96
-pip install --no-deps -e ./src/Isaac-GR00T
+Then install Isaac-GR00T and the RoboCasa GR1 task package from local checkouts:
+
+```bash
+git clone https://github.com/NVIDIA/Isaac-GR00T.git /path/to/Isaac-GR00T
+cd /path/to/Isaac-GR00T
+git checkout 4af2b622892f7dcb5aae5a3fb70bcb02dc217b96
+pip install --no-deps -e /path/to/Isaac-GR00T
 
 git clone https://github.com/robocasa/robocasa-gr1-tabletop-tasks.git \
-  ./src/robocasa-gr1-tabletop-tasks
-git -C ./src/robocasa-gr1-tabletop-tasks checkout 4840e671596f93ca03651524b9f72ffb1aadfeff
-pip install --no-deps -e ./src/robocasa-gr1-tabletop-tasks
+  /path/to/robocasa-gr1-tabletop-tasks
+cd /path/to/robocasa-gr1-tabletop-tasks
+git checkout 4840e671596f93ca03651524b9f72ffb1aadfeff
+pip install --no-deps -e /path/to/robocasa-gr1-tabletop-tasks
 ```
 
 `--no-deps` is recommended for editable installs so the RoboCasa packages do not replace the pinned FluxVLA model stack dependencies. RoboCasa assets and datasets are covered in [Data & Assets Preparation](#data--assets-preparation).
@@ -343,19 +239,15 @@ pip install --no-deps -e ./src/robocasa-gr1-tabletop-tasks
 </details>
 
 <details>
-<summary><b>Optional: LIBERO / MuJoCo EGL setup for online evaluation</b></summary>
+<summary><b>Online evaluation environment (LIBERO / EGL)</b></summary>
 
 If you want to evaluate LIBERO on devices that do not support ray tracing (e.g., A100), please refer to [EGL Device GPU Rendering Configuration](https://github.com/google-deepmind/mujoco/issues/572#issuecomment-2419965230).
-
-`scripts/install_env.sh sim-only` and `scripts/install_env.sh full` now probe MuJoCo EGL automatically. If EGL devices are not visible, the installer tries to install the system packages below, creates the NVIDIA GLVND vendor file, and writes a conda activation hook for `MUJOCO_GL=egl`. Use `FLUXVLA_EGL_SETUP=always` to make this check strict, or `--skip-egl-setup` to skip it.
 
 **Install system dependencies**
 
 ```bash
 export MUJOCO_GL=egl
-export PYOPENGL_PLATFORM=egl
-sudo apt-get update
-sudo apt-get install -y libegl1 libglvnd0 libopengl0 libegl-dev libgl1-mesa-dev libx11-dev libglew-dev libosmesa6-dev
+sudo apt install libegl-dev libgl1-mesa-dev libx11-dev libglew-dev libosmesa6-dev
 ```
 
 **Environment checks**
@@ -379,8 +271,6 @@ Create file `/usr/share/glvnd/egl_vendor.d/10_nvidia.json` with the following co
     }
 }
 ```
-
-Then launch eval with `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json` unless your environment already exports it.
 
 </details>
 
@@ -529,39 +419,25 @@ ARM training reads the `progress` column directly from this dataset. For RA-BC /
 <details>
 <summary><b>Prepare assets</b></summary>
 
-Use the FluxVLA asset downloader below as the supported path for RoboCasa GR1
-tabletop tasks. The table lists the upstream archives used by the script;
-manually downloading and extracting those archives is not sufficient for this
-stack because the script also fixes the directory layout and normalizes
-Objaverse XML metadata for the pinned RoboCasa GR1 checkout.
+Download the required assets and place them under the local directories expected by your configuration or simulator.
 
-| Asset archives                                             | Download link                                                                                                    | Local directory                                            |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `objaverse.zip`, `textures.zip`, `generative_textures.zip` | [robocasa/robocasa-assets](https://huggingface.co/datasets/robocasa/robocasa-assets)                             | `./src/robocasa-gr1-tabletop-tasks/robocasa/models/assets` |
-| `fixtures.zip`                                             | [jianzhang96/robocasa-assets](https://huggingface.co/datasets/jianzhang96/robocasa-assets)                       | `./src/robocasa-gr1-tabletop-tasks/robocasa/models/assets` |
-| `sketchfab.zip`, `lightwheel.zip`                          | [nvidia/PhysicalAI-DigitalCousin-Assets](https://huggingface.co/datasets/nvidia/PhysicalAI-DigitalCousin-Assets) | `./src/robocasa-gr1-tabletop-tasks/robocasa/models/assets` |
+| Asset                              | Download link                                                                                                    | Local directory                                               |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| RoboCasa tabletop simulator assets | [nvidia/PhysicalAI-DigitalCousin-Assets](https://huggingface.co/datasets/nvidia/PhysicalAI-DigitalCousin-Assets) | `/path/to/robocasa-gr1-tabletop-tasks/robocasa/models/assets` |
 
-When using `scripts/install_env.sh`, this downloader runs by default together
-with the RoboCasa source checkouts unless `--skip-robocasa` or
-`--skip-robocasa-assets` is passed. For manual installation or refreshing the
-assets, run this command from the FluxVLA repository root. It downloads the
-required archives through the selected Hugging Face endpoint, extracts them
-into the RoboCasa asset directory, and normalizes the Objaverse XML metadata:
+Recommended option: run the upstream asset downloader from the RoboCasa GR1
+task checkout:
 
 ```bash
-python scripts/download_robocasa_assets.py --endpoint https://hf-mirror.com
+cd /path/to/robocasa-gr1-tabletop-tasks
+python robocasa/scripts/download_tabletop_assets.py -y
 ```
 
-If the archives or extracted assets already exist locally, still run this
-script so the XML compatibility step is applied. For assets that have already
-been extracted into `./src/robocasa-gr1-tabletop-tasks/robocasa/models/assets`,
-you can run only the validation and XML normalization step:
-
-```bash
-python scripts/download_robocasa_assets.py --normalize-only
-```
-
-Symlinks are not required; they are only a convenience when the assets already live on another local disk or shared storage.
+Alternative option: download the mirrored assets from Hugging Face and place
+them directly under
+`/path/to/robocasa-gr1-tabletop-tasks/robocasa/models/assets`.
+Symlinks are not required; they are only a convenience when the assets already
+live on another local disk or shared storage.
 
 </details>
 
@@ -770,7 +646,6 @@ If you use VLM-based SARM annotation, place the official SARM VLM under `./check
 - Supports remote inference infrastructure with ZMQ-based server/client architecture, enabling GPU-offloaded inference for resource-constrained edge devices. See [Remote Inference Serving](docs/remote_inference_serving.md).
 - Supports [RTC (Real-Time Chunking)](docs/rtc.md) to improve cross-chunk trajectory continuity.
 - Supports accelerated inference for GR00T and PI0.5; see [Inference Acceleration](docs/inference_acceleration.md), including Triton fused kernels, CUDA Graph capture, and CUDA custom operators.
-- Provides a minimal Oli humanoid whole-body (loco-manipulation) real-robot inference path (rospy sensor input + WebSocket control; base/hand commands are robot-SDK integration points). See [docs/oli_whole_body.md](docs/oli_whole_body.md).
 
 </details>
 

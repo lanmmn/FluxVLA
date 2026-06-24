@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import math
+import os
 from typing import Dict
 
 import torch
@@ -23,6 +24,27 @@ from fluxvla.ops.atomic_ops import dit_block_cross, dit_block_self, vl_sa_block
 from fluxvla.ops.triton.position_embedding import \
     fused_position_embedding_add_inplace
 from .flow_matching_head import FlowMatchingHead
+
+
+def _debug_tensor_summary(label: str, tensor: torch.Tensor) -> None:
+    if os.environ.get('FLUXVLA_DEBUG_NAN', '0') != '1':
+        return
+    detached = tensor.detach()
+    finite = torch.isfinite(detached)
+    finite_count = int(finite.sum().item())
+    total_count = detached.numel()
+    if finite_count:
+        finite_values = detached[finite].float()
+        min_value = float(finite_values.min().item())
+        max_value = float(finite_values.max().item())
+    else:
+        min_value = float('nan')
+        max_value = float('nan')
+    print(
+        f'[NaNDebug] {label}: tensor shape={tuple(detached.shape)} '
+        f'dtype={detached.dtype} finite={finite_count}/{total_count} '
+        f'min={min_value:.6g} max={max_value:.6g}',
+        flush=True)
 
 
 def _timestep_embedding(timesteps, channels=256):
@@ -827,6 +849,7 @@ class FlowMatchingInferenceHead(FlowMatchingHead):
         self.graph.replay()
 
         actions = self.buffers['actions']
+        _debug_tensor_summary('flow_head.graph_actions', actions)
         if self.ori_action_dim is not None:
             actions = actions[:, :, :self.ori_action_dim]
         return actions

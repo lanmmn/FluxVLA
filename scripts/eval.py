@@ -18,8 +18,6 @@ import copy
 from mmengine import Config, DictAction
 
 from fluxvla.engines import build_runner_from_cfg, initialize_overwatch
-from fluxvla.engines.utils.torch_utils import \
-    configure_inference_attention_defaults
 
 overwatch = initialize_overwatch(__name__)
 
@@ -104,7 +102,6 @@ def parse_args():
 
 
 if __name__ == '__main__':
-    configure_inference_attention_defaults()
     args, _ = parse_args()
     cfg = Config.fromfile(args.config)
     if args.cfg_options is not None:

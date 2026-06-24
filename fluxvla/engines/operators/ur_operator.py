@@ -499,7 +499,14 @@ class UROperator:
         # Collect camera information
         self.cam_info_dict = {}
         for topic in camera_info_topics:
-            camera_info = rospy.wait_for_message(topic, CameraInfo, timeout=5)
+            try:
+                camera_info = rospy.wait_for_message(
+                    topic, CameraInfo, timeout=5)
+            except rospy.exceptions.ROSException as exc:
+                rospy.logwarn(
+                    'Skip camera info topic %s during initialization: %s',
+                    topic, exc)
+                continue
             self.cam_info_dict[topic] = {
                 'rostopic': topic,
                 'height': camera_info.height,

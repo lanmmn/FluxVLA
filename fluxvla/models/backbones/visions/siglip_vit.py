@@ -17,8 +17,16 @@ from typing import Callable, Dict, Tuple
 
 import torch
 from timm.models.vision_transformer import Block, VisionTransformer
-from torch.distributed.fsdp.wrap import (_module_wrap_policy, _or_policy,
-                                         transformer_auto_wrap_policy)
+try:
+    from torch.distributed.fsdp.wrap import (_module_wrap_policy, _or_policy,
+                                             transformer_auto_wrap_policy)
+except ModuleNotFoundError as exc:
+    _module_wrap_policy = None
+    _or_policy = None
+    transformer_auto_wrap_policy = None
+    _FSDP_WRAP_IMPORT_ERROR = exc
+else:
+    _FSDP_WRAP_IMPORT_ERROR = None
 
 from fluxvla.engines import VISION_BACKBONES
 from .base_vision import VisionBackbone
@@ -47,8 +55,6 @@ class SigLIPViTBackbone(VisionBackbone):
             vision_config = vision_cfg(**vision_config)
             self.vision = vision_cls(vision_config)
         else:
-            pretrained_cfg = dict(pretrained_cfg)
-            pretrained_cfg.setdefault('trust_remote_code', True)
             self.vision = vision_cls.from_pretrained(**pretrained_cfg)
 
     def get_fsdp_wrapping_policy(self) -> Callable:
@@ -59,6 +65,8 @@ class SigLIPViTBackbone(VisionBackbone):
         Returns:
             Callable: A composite policy for FSDP module wrapping.
         """
+        if _FSDP_WRAP_IMPORT_ERROR is not None:
+            raise RuntimeError('FSDP wrapping policies are unavailable in this torch build') from _FSDP_WRAP_IMPORT_ERROR
         vit_wrap_policy = partial(
             _module_wrap_policy, module_classes={VisionTransformer})
         transformer_block_policy = partial(

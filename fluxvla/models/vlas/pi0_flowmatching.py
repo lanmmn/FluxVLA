@@ -845,6 +845,8 @@ class PI0FlowMatching(BaseVLA):
         and combines with VLM's existing policy. It explicitly avoids wrapping
         nn.Embedding to prevent errors during sharding.
         """
+        if _FSDP_WRAP_IMPORT_ERROR is not None:
+            raise RuntimeError('FSDP wrapping policies are unavailable in this torch build') from _FSDP_WRAP_IMPORT_ERROR
         wrapping_policies = []
         if self.vlm_backbone is not None:
             vlm_wrapping_policy = self.vlm_backbone.get_fsdp_wrapping_policy()

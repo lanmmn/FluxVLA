@@ -14,7 +14,9 @@
 import torch
 from torch.autograd import Function
 
-from . import rotary_pos_embedding_ext
+from importlib import import_module
+
+rotary_pos_embedding_ext = import_module('.rotary_pos_embedding_ext', __package__)
 
 
 class RotaryPosEmbedding(Function):
