@@ -15,9 +15,16 @@
 from functools import partial
 from typing import Callable, Dict, List, Optional, Type
 
+import os
 import torch
 from torch import nn
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+try:
+    from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+except ModuleNotFoundError as exc:
+    transformer_auto_wrap_policy = None
+    _FSDP_WRAP_IMPORT_ERROR = exc
+else:
+    _FSDP_WRAP_IMPORT_ERROR = None
 from transformers import AutoConfig
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.models.qwen3.modeling_qwen3 import (Qwen3Attention,
@@ -27,9 +34,14 @@ from transformers.models.qwen3.modeling_qwen3 import (Qwen3Attention,
 from fluxvla.engines import VLM_BACKBONES, str_to_dtype
 from fluxvla.models.third_party_models.eagle2_hg_model.modeling_eagle2_5_vl import \
     Eagle2_5_VLForConditionalGeneration  # noqa: E501
-from fluxvla.models.third_party_models.eagle2_hg_model.modeling_eagle2_5_vl_inference import \
-    Eagle2_5_VLInferenceForConditionalGeneration  # noqa: E501
-from .hf_vlm import apply_attn_implementation_to_config
+try:
+    from fluxvla.models.third_party_models.eagle2_hg_model.modeling_eagle2_5_vl_inference import \
+        Eagle2_5_VLInferenceForConditionalGeneration  # noqa: E501
+except ModuleNotFoundError as exc:
+    Eagle2_5_VLInferenceForConditionalGeneration = None
+    _EAGLE_INFERENCE_IMPORT_ERROR = exc
+else:
+    _EAGLE_INFERENCE_IMPORT_ERROR = None
 
 
 @VLM_BACKBONES.register_module()
@@ -69,9 +81,13 @@ class EagleBackbone(nn.Module):
         elif hasattr(config, 'num_hidden_layers'):
             config.num_hidden_layers = select_layer
 
-        # Ensure the attention implementation is set before model creation.
-        # This must be done BEFORE model creation
-        apply_attn_implementation_to_config(config, 'flash_attention_2')
+        # Respect runtime override for Jetson/Orin where flash-attn may be unavailable.
+        attn_impl = os.environ.get('ATTN_IMPLEMENTATION') or os.environ.get('TRANSFORMERS_ATTN_IMPLEMENTATION') or 'flash_attention_2'
+        config._attn_implementation = attn_impl
+        if hasattr(config, 'vision_config'):
+            config.vision_config._attn_implementation = attn_impl
+        if hasattr(config, 'text_config'):
+            config.text_config._attn_implementation = attn_impl
 
         # Use torch_dtype parameter to initialize directly with the target
         # dtype This avoids the expensive .to() conversion after initialization
@@ -227,6 +243,8 @@ class EagleBackbone(nn.Module):
         Returns:
             Callable: Wrapping policy function.
         """
+        if _FSDP_WRAP_IMPORT_ERROR is not None:
+            raise RuntimeError('FSDP wrapping policies are unavailable in this torch build') from _FSDP_WRAP_IMPORT_ERROR
         transformer_block_policy = partial(
             transformer_auto_wrap_policy,
             transformer_layer_cls={Qwen3Attention, Qwen3MLP},
@@ -277,15 +295,21 @@ class EagleInferenceBackbone(nn.Module):
         elif hasattr(config, 'num_hidden_layers'):
             config.num_hidden_layers = select_layer
 
-        # Ensure the attention implementation is set before model creation.
-        # This must be done BEFORE model creation
-        apply_attn_implementation_to_config(config, 'flash_attention_2')
+        # Respect runtime override for Jetson/Orin where flash-attn may be unavailable.
+        attn_impl = os.environ.get('ATTN_IMPLEMENTATION') or os.environ.get('TRANSFORMERS_ATTN_IMPLEMENTATION') or 'flash_attention_2'
+        config._attn_implementation = attn_impl
+        if hasattr(config, 'vision_config'):
+            config.vision_config._attn_implementation = attn_impl
+        if hasattr(config, 'text_config'):
+            config.text_config._attn_implementation = attn_impl
 
         # Use torch_dtype parameter to initialize directly with the target
         # dtype This avoids the expensive .to() conversion after initialization
         target_dtype = str_to_dtype(dtype) if dtype is not None else None
 
         # Initialize model and convert to target dtype
+        if Eagle2_5_VLInferenceForConditionalGeneration is None:
+            raise RuntimeError('Eagle inference backbone requires optional triton dependency') from _EAGLE_INFERENCE_IMPORT_ERROR
         self.vlm = Eagle2_5_VLInferenceForConditionalGeneration(config=config)
         if target_dtype is not None:
             self.vlm = self.vlm.to(target_dtype)

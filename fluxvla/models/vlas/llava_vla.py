@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from pathlib import Path
+import os
 from typing import Dict, List, Optional
 
 import torch
@@ -21,6 +22,27 @@ from fluxvla.engines import VLAS, initialize_overwatch
 from .open_vla import OpenVLA
 
 overwatch = initialize_overwatch(__name__)
+
+
+def _debug_tensor_summary(label: str, tensor: torch.Tensor) -> None:
+    if os.environ.get('FLUXVLA_DEBUG_NAN', '0') != '1':
+        return
+    detached = tensor.detach()
+    finite = torch.isfinite(detached)
+    finite_count = int(finite.sum().item())
+    total_count = detached.numel()
+    if finite_count:
+        finite_values = detached[finite].float()
+        min_value = float(finite_values.min().item())
+        max_value = float(finite_values.max().item())
+    else:
+        min_value = float('nan')
+        max_value = float('nan')
+    print(
+        f'[NaNDebug] {label}: tensor shape={tuple(detached.shape)} '
+        f'dtype={detached.dtype} finite={finite_count}/{total_count} '
+        f'min={min_value:.6g} max={max_value:.6g}',
+        flush=True)
 
 
 @VLAS.register_module()
@@ -184,6 +206,14 @@ class LlavaVLA(OpenVLA):
                        rtc_config: Optional[Dict] = None,
                        *args,
                        **kwargs):
+        profile = os.environ.get('FLUXVLA_PROFILE_PREDICT_ACTION', '0') == '1'
+        if profile and torch.cuda.is_available():
+            backbone_start = torch.cuda.Event(enable_timing=True)
+            backbone_end = torch.cuda.Event(enable_timing=True)
+            head_start = torch.cuda.Event(enable_timing=True)
+            head_end = torch.cuda.Event(enable_timing=True)
+            backbone_start.record()
+
         if hasattr(self, 'vlm_backbone') and self.vlm_backbone is not None:
             last_hidden_state, fused_attention_mask, _ = self.vlm_backbone(
                 images=images,
@@ -202,6 +232,14 @@ class LlavaVLA(OpenVLA):
                 assert 'last_hidden_state' in output, \
                     'Output must contain either hidden_states or last_hidden_state.'  # noqa: E501
                 last_hidden_state = output['last_hidden_state']
+
+        if profile and torch.cuda.is_available():
+            backbone_end.record()
+            head_start.record()
+
+        _debug_tensor_summary('llava_vla.last_hidden_state',
+                              last_hidden_state)
+
         pred_actions = self.vla_head.predict_action(
             input_features=last_hidden_state,
             states=states,
@@ -210,4 +248,15 @@ class LlavaVLA(OpenVLA):
             prev_actions=prev_actions,
             prefix_len=prefix_len,
             rtc_config=rtc_config)
+
+        if profile and torch.cuda.is_available():
+            head_end.record()
+            head_end.synchronize()
+            print(
+                '[LlavaVLAProfile] '
+                f'backbone={backbone_start.elapsed_time(backbone_end):.2f}ms  '
+                f'head={head_start.elapsed_time(head_end):.2f}ms  '
+                f'total={backbone_start.elapsed_time(head_end):.2f}ms',
+                flush=True)
+
         return pred_actions.float()

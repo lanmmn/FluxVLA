@@ -13,7 +13,9 @@
 # limitations under the License.
 import torch
 
-from . import matmul_bias_ext
+from importlib import import_module
+
+matmul_bias_ext = import_module('.matmul_bias_ext', __package__)
 
 
 def matmul_bias_cuda(inp: torch.Tensor,

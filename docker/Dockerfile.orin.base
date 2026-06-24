@@ -1,0 +1,112 @@
+FROM nvcr.io/nvidia/l4t-jetpack:r36.4.0
+
+ARG VERSION=dev
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=unknown
+ARG UBUNTU_PORTS_MIRROR=
+ARG PIP_INDEX_URL=
+ARG PIP_TRUSTED_HOST=
+
+LABEL org.opencontainers.image.title="FluxVLA Orin Base" \
+      org.opencontainers.image.description="FluxVLA base image for NVIDIA Jetson AGX Orin (JetPack r36.4 / CUDA 12.6)" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.base.name="nvcr.io/nvidia/l4t-jetpack:r36.4.0" \
+      org.opencontainers.image.vendor="Limx Dynamics"
+
+ENV FLUXVLA_VERSION=${VERSION} \
+    FLUXVLA_GIT_SHA=${GIT_SHA} \
+    FLUXVLA_BUILD_DATE=${BUILD_DATE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    CUDA_HOME=/usr/local/cuda \
+    MUJOCO_GL=egl \
+    NVIDIA_DRIVER_CAPABILITIES=all \
+    TORCH_CUDA_ARCH_LIST=8.7 \
+    FORCE_CUDA=1 \
+    PIP_NO_CACHE_DIR=1
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
+
+WORKDIR /workspace
+
+RUN printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-fluxvla-retries && \
+    if [ -n "${UBUNTU_PORTS_MIRROR}" ]; then \
+      sed -i "s|http://ports.ubuntu.com/ubuntu-ports|${UBUNTU_PORTS_MIRROR}|g" /etc/apt/sources.list && \
+      sed -i "s|https://ports.ubuntu.com/ubuntu-ports|${UBUNTU_PORTS_MIRROR}|g" /etc/apt/sources.list; \
+    fi && \
+    if [ -n "${PIP_INDEX_URL}" ]; then \
+      printf '[global]\nindex-url = %s\n' "${PIP_INDEX_URL}" > /etc/pip.conf && \
+      if [ -n "${PIP_TRUSTED_HOST}" ]; then \
+        printf 'trusted-host = %s\n' "${PIP_TRUSTED_HOST}" >> /etc/pip.conf; \
+      fi; \
+    fi
+
+RUN apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+      python3-pip python3-dev git wget curl vim ca-certificates \
+      build-essential cmake ninja-build pkg-config \
+      libegl-dev libgl1-mesa-dev libx11-dev libglew-dev libosmesa6-dev \
+      libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 \
+      libjpeg-dev zlib1g-dev libopenblas-dev libopenmpi-dev openmpi-bin && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
+
+RUN python3 -m pip install --upgrade pip setuptools wheel && \
+    pip3 install psutil ninja packaging einops==0.4.1
+
+RUN wget -q https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-sbsa/libcusparse_lt-linux-sbsa-0.5.2.1-archive.tar.xz -O /tmp/cusparselt.tar.xz && \
+    mkdir -p /tmp/cusparselt && \
+    tar -xf /tmp/cusparselt.tar.xz -C /tmp/cusparselt --strip-components=1 && \
+    cp -a /tmp/cusparselt/include/* /usr/local/cuda/include/ && \
+    cp -a /tmp/cusparselt/lib/* /usr/local/cuda/lib64/ && \
+    rm -rf /tmp/cusparselt /tmp/cusparselt.tar.xz && \
+    ldconfig && \
+    pip3 install numpy==1.26.4 && \
+    pip3 install https://developer.download.nvidia.com/compute/redist/jp/v61/pytorch/torch-2.5.0a0+872d972e41.nv24.08.17622132-cp310-cp310-linux_aarch64.whl && \
+    wget -q --tries=5 --waitretry=5 https://codeload.github.com/pytorch/vision/tar.gz/refs/tags/v0.20.0 -O /tmp/vision.tar.gz && \
+    mkdir -p /tmp/vision && \
+    tar -xzf /tmp/vision.tar.gz -C /tmp/vision --strip-components=1 && \
+    cd /tmp/vision && \
+    BUILD_VERSION=0.20.0 python3 -m pip install --no-build-isolation --no-deps . && \
+    cd /workspace && rm -rf /tmp/vision /tmp/vision.tar.gz
+
+COPY requirements_orin_notorch.txt constraints_orin.txt /workspace/
+COPY vendor/dlimp /workspace/vendor/dlimp
+RUN pip3 install triton==3.5.1 && \
+    pip3 install --no-deps -e /workspace/vendor/dlimp && \
+    pip3 install --no-deps -r /workspace/requirements_orin_notorch.txt && \
+  pip3 install -c /workspace/constraints_orin.txt \
+      absl-py addict aiohttp array-record attrs certifi charset-normalizer click contourpy cycler decorator dill etils filelock fonttools fsspec gast gitpython google-api-core google-auth google-auth-oauthlib google-cloud-core google-cloud-storage google-cloud-storage-control google-crc32c google-pasta google-resumable-media googleapis-common-protos grpcio gym-notices h5py hf-xet huggingface-hub idna importlib-metadata jmespath keras kiwisolver markdown matplotlib-inline mergedeep ml-dtypes multiprocess oauthlib omegaconf openexr opt-einsum pandas pillow platformdirs protobuf pyarrow pydantic pyparsing python-dateutil pyyaml pyyaml-include regex requests requests-oauthlib rich s3transfer safetensors scipy six tensorboard tensorflow-cpu-aws tensorflow-datasets tensorflow-estimator tensorflow-io-gcs-filesystem tensorflow-metadata termcolor tokenizers toml tqdm typing-extensions typing-inspect trimesh urllib3 wrapt xxhash yapf
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ffmpeg python3-av && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
+
+COPY . /workspace/FluxVLA
+
+WORKDIR /workspace/FluxVLA
+RUN pip3 install --no-build-isolation --no-deps .
+
+WORKDIR /workspace
+RUN python3 - <<'PY'
+import importlib
+mods = [
+    'torch', 'torchvision', 'numpy', 'triton', 'transformers', 'accelerate', 'datasets',
+    'diffusers', 'mmengine', 'peft', 'timm', 'fluxvla',
+    'fluxvla.transforms.utils',
+    'fluxvla.transforms.transform_inputs',
+    'fluxvla.datasets.rlds_dataset',
+    'fluxvla.datasets.utils.droid_utils',
+    'fluxvla.ops.cuda.gemma_rotary_embedding.gemma_rotary_embedding',
+    'fluxvla.ops.cuda.rotary_pos_embedding.rotary_pos_embedding',
+    'fluxvla.ops.cuda.matmul_bias.matmul_bias',
+]
+for name in mods:
+    mod = importlib.import_module(name)
+    print(f'{name}: {getattr(mod, "__version__", "ok")}')
+PY
+
+CMD ["/bin/bash"]

@@ -82,3 +82,6 @@ AGENTS.md
 .cursorignore
 .cursorindexingignore
 FluxBisim/
+
+# Local Docker wheelhouse staging
+docker/.wheelhouse/

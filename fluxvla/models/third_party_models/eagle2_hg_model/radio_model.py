@@ -19,6 +19,7 @@
 
 import copy
 import math
+import os
 import warnings
 from collections import namedtuple
 from types import MethodType
@@ -43,12 +44,20 @@ from transformers.utils import ModelOutput
 try:  # v1
     from flash_attn.flash_attn_interface import \
         flash_attn_unpadded_qkvpacked_func
-except (ImportError, OSError):  # v2 / prebuilt wheel ABI fallback
-    from flash_attn.flash_attn_interface import (
-        flash_attn_varlen_qkvpacked_func as flash_attn_unpadded_qkvpacked_func,
-    )
-
-from flash_attn.bert_padding import pad_input, unpad_input
+    from flash_attn.bert_padding import pad_input, unpad_input
+    _FLASH_ATTN_AVAILABLE = True
+except ImportError:
+    try:  # v2
+        from flash_attn.flash_attn_interface import (
+            flash_attn_varlen_qkvpacked_func as flash_attn_unpadded_qkvpacked_func,
+        )
+        from flash_attn.bert_padding import pad_input, unpad_input
+        _FLASH_ATTN_AVAILABLE = True
+    except ImportError:
+        flash_attn_unpadded_qkvpacked_func = None
+        pad_input = None
+        unpad_input = None
+        _FLASH_ATTN_AVAILABLE = False
 
 
 class FlashAttention(nn.Module):
@@ -191,7 +200,10 @@ def replace_vit_attn_with_flash_attn():
     Attention._flash_attn = _flash_attn
 
 
-replace_vit_attn_with_flash_attn()
+if _FLASH_ATTN_AVAILABLE and torch.cuda.is_available() and (
+        os.environ.get('ATTN_IMPLEMENTATION', 'flash_attention_2') == 'flash_attention_2'
+        or os.environ.get('TRANSFORMERS_ATTN_IMPLEMENTATION', 'flash_attention_2') == 'flash_attention_2'):
+    replace_vit_attn_with_flash_attn()
 ####
 
 input_dim_t = Union[int, Tuple[int, int]]

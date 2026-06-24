@@ -18,7 +18,14 @@ from typing import Any, Callable, Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
-from torch.distributed.fsdp.wrap import _module_wrap_policy, _or_policy
+try:
+    from torch.distributed.fsdp.wrap import _module_wrap_policy, _or_policy
+except ModuleNotFoundError as exc:
+    _module_wrap_policy = None
+    _or_policy = None
+    _FSDP_WRAP_IMPORT_ERROR = exc
+else:
+    _FSDP_WRAP_IMPORT_ERROR = None
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from fluxvla.engines import (VLAS, build_tokenizer_from_cfg,
@@ -475,6 +482,8 @@ class OpenVLA(BaseVLA):
         Returns:
             Callable: The wrapping policy for FSDP.
         """
+        if _FSDP_WRAP_IMPORT_ERROR is not None:
+            raise RuntimeError('FSDP wrapping policies are unavailable in this torch build') from _FSDP_WRAP_IMPORT_ERROR
         fsdp_policy_list = list()
         if hasattr(self, 'vision_backbone') and hasattr(
                 self.vision_backbone, 'get_fsdp_wrapping_policy'):

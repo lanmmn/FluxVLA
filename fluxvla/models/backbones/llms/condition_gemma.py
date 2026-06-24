@@ -17,7 +17,13 @@ from typing import Callable, Optional, Sequence, Type, Union
 
 import torch
 from torch import nn
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+try:
+    from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+except ModuleNotFoundError as exc:
+    transformer_auto_wrap_policy = None
+    _FSDP_WRAP_IMPORT_ERROR = exc
+else:
+    _FSDP_WRAP_IMPORT_ERROR = None
 from transformers.activations import ACT2FN
 from transformers.cache_utils import Cache, DynamicCache
 from transformers.generation import GenerationMixin
@@ -1044,6 +1050,8 @@ class ConditionGemmaModel(GemmaPreTrainedModel):
         """
         Returns a function used to determine which modules to wrap with FSDP.
         """
+        if _FSDP_WRAP_IMPORT_ERROR is not None:
+            raise RuntimeError('FSDP wrapping policies are unavailable in this torch build') from _FSDP_WRAP_IMPORT_ERROR
         transformer_block_policy = partial(
             transformer_auto_wrap_policy,
             transformer_layer_cls={self.transformer_layer_cls, nn.Parameter},

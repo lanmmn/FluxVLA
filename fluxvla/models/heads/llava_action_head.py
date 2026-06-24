@@ -18,7 +18,13 @@ from typing import Callable
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed.fsdp.wrap import _module_wrap_policy
+try:
+    from torch.distributed.fsdp.wrap import _module_wrap_policy
+except ModuleNotFoundError as exc:
+    _module_wrap_policy = None
+    _FSDP_WRAP_IMPORT_ERROR = exc
+else:
+    _FSDP_WRAP_IMPORT_ERROR = None
 from transformers import LlamaConfig, LlamaModel
 
 from fluxvla.engines import HEADS
@@ -340,6 +346,8 @@ class LlavaActionHead(nn.Module):
         Returns:
             Callable: A policy that wraps the head module.
         """
+        if _FSDP_WRAP_IMPORT_ERROR is not None:
+            raise RuntimeError('FSDP wrapping policies are unavailable in this torch build') from _FSDP_WRAP_IMPORT_ERROR
         return partial(
             _module_wrap_policy,
             module_classes={SimpleTransformer, Block, Mlp})

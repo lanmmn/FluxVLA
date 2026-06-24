@@ -1,4 +1,6 @@
 import math
+import os
+import time
 
 import torch
 
@@ -13,6 +15,9 @@ from fluxvla.ops.atomic_ops import (AttnMultiKey, adarms_norm_style_proj,
                                     matmul_qkv_rope, matmul_res,
                                     matmul_res_gate, matmul_split_k_bias_res,
                                     rms_matmul_gate, rms_matmul_qkv_rope)
+from fluxvla.ops.flashrt_fa2 import (check_flashrt_fa2_available,
+                                     pi05_decoder_attention,
+                                     pi05_encoder_attention)
 from fluxvla.ops.triton.attention_triton_ops import (
     matmul_abT_scale, softmax_kernel_masklen, softmax_kernel_prefix_suffix)
 # yapf: enable
@@ -69,7 +74,8 @@ def vision_encoder(weights, buffers, num_views, num_vit_layers=27):
 def transformer_encoder(weights,
                         buffers,
                         encoder_seq_len,
-                        num_encoder_layers=18):
+                        num_encoder_layers=18,
+                        use_flashrt_fa2=False):
     layer_norm_matmul_bias(
         buffers['vision_x'],
         weights['vision_final_norm_w'],
@@ -97,39 +103,48 @@ def transformer_encoder(weights,
             num_kv_heads=8)
 
         if i != num_encoder_layers - 1:
-            scale = 1.0 / (256**0.5)
-            total_queries = buffers['encoder_Q'].shape[0]
-            total_keys = encoder_seq_len
-            matmul_abT_scale[(((total_queries + 31) // 32) *
-                              ((total_keys + 31) // 32), )](
-                                  buffers['encoder_Q'],
-                                  buffers['encoder_K'][i, :encoder_seq_len],
-                                  buffers['encoder_logits_buf'],
-                                  total_queries,
-                                  total_keys,
-                                  256,
-                                  scale,
-                                  BLOCK_SIZE_M=32,
-                                  BLOCK_SIZE_N=32,
-                                  BLOCK_SIZE_K=64)
+            if use_flashrt_fa2:
+                encoder_ctx = pi05_encoder_attention(
+                    buffers['encoder_Q'], buffers['encoder_K'][i],
+                    buffers['encoder_V'][i], buffers['encoder_fa2_o'],
+                    buffers['encoder_fa2_lse'],
+                    buffers['encoder_fa2_lse_accum'],
+                    buffers['encoder_fa2_o_accum'], encoder_seq_len)
+            else:
+                scale = 1.0 / (256**0.5)
+                total_queries = buffers['encoder_Q'].shape[0]
+                total_keys = encoder_seq_len
+                matmul_abT_scale[(((total_queries + 31) // 32) *
+                                  ((total_keys + 31) // 32), )](
+                                      buffers['encoder_Q'],
+                                      buffers['encoder_K'][i, :encoder_seq_len],
+                                      buffers['encoder_logits_buf'],
+                                      total_queries,
+                                      total_keys,
+                                      256,
+                                      scale,
+                                      BLOCK_SIZE_M=32,
+                                      BLOCK_SIZE_N=32,
+                                      BLOCK_SIZE_K=64)
 
-            softmax_kernel_masklen[((total_queries + 3) // 4, )](
-                buffers['encoder_logits_buf'],
-                total_queries,
-                total_keys,
-                buffers['valid_encoder_len'],
-                buffers['encoder_attn_buf'],
-                BLOCK_SIZE_M=4,
-                BLOCK_SIZE=1024)
+                softmax_kernel_masklen[((total_queries + 3) // 4, )](
+                    buffers['encoder_logits_buf'],
+                    total_queries,
+                    total_keys,
+                    buffers['valid_encoder_len'],
+                    buffers['encoder_attn_buf'],
+                    BLOCK_SIZE_M=4,
+                    BLOCK_SIZE=1024)
 
-            matmul_attn_v(
-                buffers['encoder_attn_buf'],
-                buffers['encoder_V'][i, :encoder_seq_len],
-                buffers['encoder_ctx_buf'],
-                head_dim=256)
+                matmul_attn_v(
+                    buffers['encoder_attn_buf'],
+                    buffers['encoder_V'][i, :encoder_seq_len],
+                    buffers['encoder_ctx_buf'],
+                    head_dim=256)
+                encoder_ctx = buffers['encoder_ctx_buf'].view(-1, 2048)
 
             matmul_res(
-                buffers['encoder_ctx_buf'].view(-1, 2048),
+                encoder_ctx,
                 weights['encoder_attn_o_w'][i],
                 buffers['encoder_x'],
                 in_features=2048,
@@ -156,7 +171,8 @@ def transformer_decoder(weights,
                         buffers,
                         encoder_seq_len,
                         num_decoder_layers=18,
-                        num_steps=10):
+                        num_steps=10,
+                        use_flashrt_fa2=False):
     for step in range(num_steps):
         matmul_bias_silu(
             weights['decoder_time_embeds'][step].view(1, -1),
@@ -214,38 +230,47 @@ def transformer_decoder(weights,
             suffix_keys = seq_len
             total_keys = prefix_keys + suffix_keys
 
-            matmul_abT_scale[(((total_queries + 31) // 32) *
-                              ((total_keys + 31) // 32), )](
-                                  buffers['decoder_q_buf'],
-                                  buffers['encoder_K'][i, :encoder_seq_len +
-                                                       seq_len],
-                                  buffers['decoder_logits_buf'],
-                                  total_queries,
-                                  total_keys,
-                                  256,
-                                  256**-0.5,
-                                  BLOCK_SIZE_M=32,
-                                  BLOCK_SIZE_N=32,
-                                  BLOCK_SIZE_K=64)
+            if use_flashrt_fa2:
+                decoder_ctx = pi05_decoder_attention(
+                    buffers['decoder_q_buf'], buffers['encoder_K'][i],
+                    buffers['encoder_V'][i], buffers['decoder_fa2_o'],
+                    buffers['decoder_fa2_lse'],
+                    buffers['decoder_fa2_lse_accum'],
+                    buffers['decoder_fa2_o_accum'], seq_len, total_keys)
+            else:
+                matmul_abT_scale[(((total_queries + 31) // 32) *
+                                  ((total_keys + 31) // 32), )](
+                                      buffers['decoder_q_buf'],
+                                      buffers['encoder_K'][i, :encoder_seq_len +
+                                                           seq_len],
+                                      buffers['decoder_logits_buf'],
+                                      total_queries,
+                                      total_keys,
+                                      256,
+                                      256**-0.5,
+                                      BLOCK_SIZE_M=32,
+                                      BLOCK_SIZE_N=32,
+                                      BLOCK_SIZE_K=64)
 
-            softmax_kernel_prefix_suffix[((total_queries + 3) // 4, )](
-                buffers['decoder_logits_buf'],
-                total_queries,
-                prefix_keys,
-                suffix_keys,
-                buffers['valid_encoder_len'],
-                buffers['decoder_attn_buf'],
-                BLOCK_SIZE_M=4,
-                BLOCK_SIZE=1024)
+                softmax_kernel_prefix_suffix[((total_queries + 3) // 4, )](
+                    buffers['decoder_logits_buf'],
+                    total_queries,
+                    prefix_keys,
+                    suffix_keys,
+                    buffers['valid_encoder_len'],
+                    buffers['decoder_attn_buf'],
+                    BLOCK_SIZE_M=4,
+                    BLOCK_SIZE=1024)
 
-            matmul_attn_v(
-                buffers['decoder_attn_buf'],
-                buffers['encoder_V'][i, :encoder_seq_len + seq_len],
-                buffers['decoder_q_buf'],
-                head_dim=256)
+                matmul_attn_v(
+                    buffers['decoder_attn_buf'],
+                    buffers['encoder_V'][i, :encoder_seq_len + seq_len],
+                    buffers['decoder_q_buf'],
+                    head_dim=256)
+                decoder_ctx = buffers['decoder_q_buf'].view(-1, 2048)
 
             matmul_res_gate(
-                buffers['decoder_q_buf'].view(-1, 2048),
+                decoder_ctx,
                 weights['decoder_attn_o_w'][i],
                 buffers['decoder_x'],
                 buffers['gate_buf'],
@@ -319,11 +344,13 @@ def pi05_model(weights,
                num_vit_layers=27,
                num_encoder_layers=18,
                num_decoder_layers=18,
-               num_steps=10):
+               num_steps=10,
+               use_flashrt_fa2=False):
     vision_encoder(weights, buffers, num_views, num_vit_layers)
-    transformer_encoder(weights, buffers, encoder_seq_len, num_encoder_layers)
+    transformer_encoder(weights, buffers, encoder_seq_len, num_encoder_layers,
+                        use_flashrt_fa2)
     transformer_decoder(weights, buffers, encoder_seq_len, num_decoder_layers,
-                        num_steps)
+                        num_steps, use_flashrt_fa2)
 
 
 @VLAS.register_module()
@@ -352,6 +379,16 @@ class PI05FlowMatchingInference(PI05FlowMatching):
         self._triton_ready = False
         self._cuda_graph = None
         self._cuda_graph_ready = False
+        self._use_flashrt_fa2 = os.environ.get('FLUXVLA_PI05_FA2', '0') == '1'
+        self._active_encoder_seq_len = None
+        self._captured_encoder_seq_len = None
+        self._cuda_graph_cache = {}
+        self._cuda_graph_cache_size = int(
+            os.environ.get('FLUXVLA_PI05_GRAPH_CACHE_SIZE', '4'))
+        self._pi05_profile = os.environ.get('FLUXVLA_PI05_PROFILE', '0') == '1'
+        self._pi05_profile_interval = int(
+            os.environ.get('FLUXVLA_PI05_PROFILE_INTERVAL', '20'))
+        self._pi05_profile_count = 0
 
     def _init_buffers(self):
         nv = self.num_views
@@ -440,6 +477,37 @@ class PI05FlowMatchingInference(PI05FlowMatching):
             'diffusion_noise':
             torch.zeros(dec, ad, dtype=bf, device=dev),
         }
+        if self._use_flashrt_fa2:
+            self._triton_bufs.update({
+                'encoder_fa2_o':
+                torch.zeros(1, enc, nkv, hd, dtype=bf, device=dev),
+                'encoder_fa2_lse':
+                torch.zeros(1, nkv, ((enc + 127) // 128) * 128,
+                            dtype=torch.float32,
+                            device=dev),
+                'encoder_fa2_lse_accum':
+                torch.zeros(min(128, (enc + 63) // 64), 1, nkv, enc,
+                            dtype=torch.float32,
+                            device=dev),
+                'encoder_fa2_o_accum':
+                torch.zeros(min(128, (enc + 63) // 64), 1, nkv, enc, hd,
+                            dtype=torch.float32,
+                            device=dev),
+                'decoder_fa2_o':
+                torch.zeros(1, dec, nkv, hd, dtype=bf, device=dev),
+                'decoder_fa2_lse':
+                torch.zeros(1, nkv, ((dec + 127) // 128) * 128,
+                            dtype=torch.float32,
+                            device=dev),
+                'decoder_fa2_lse_accum':
+                torch.zeros(min(128, (enc + dec + 63) // 64), 1, nkv, dec,
+                            dtype=torch.float32,
+                            device=dev),
+                'decoder_fa2_o_accum':
+                torch.zeros(min(128, (enc + dec + 63) // 64), 1, nkv, dec, hd,
+                            dtype=torch.float32,
+                            device=dev),
+            })
 
     def _init_rope_table(self):
         prefix_alloc = self.num_views * 256 + self._max_prompt_len
@@ -461,10 +529,13 @@ class PI05FlowMatchingInference(PI05FlowMatching):
         return self._rope_table[start:end]
 
     def _run_forward(self):
+        encoder_seq_len = self._encoder_seq_len
+        if self._use_flashrt_fa2:
+            encoder_seq_len = self._active_encoder_seq_len or encoder_seq_len
         pi05_model(self._triton_weights, self._triton_bufs, self.num_views,
-                   self._encoder_seq_len, self._num_vit_layers,
+                   encoder_seq_len, self._num_vit_layers,
                    self._num_encoder_layers, self._num_decoder_layers,
-                   self._num_steps)
+                   self._num_steps, self._use_flashrt_fa2)
 
     def _build_cuda_graph(self):
         print('[Triton Inference] Recording CUDA Graph ...')
@@ -481,6 +552,14 @@ class PI05FlowMatchingInference(PI05FlowMatching):
         torch.cuda.synchronize()
 
         self._cuda_graph_ready = True
+        self._captured_encoder_seq_len = self._active_encoder_seq_len
+        if (self._use_flashrt_fa2 and self._cuda_graph_cache_size > 0
+                and self._captured_encoder_seq_len is not None):
+            if (self._captured_encoder_seq_len not in self._cuda_graph_cache
+                    and len(self._cuda_graph_cache) >= self._cuda_graph_cache_size):
+                oldest_key = next(iter(self._cuda_graph_cache))
+                del self._cuda_graph_cache[oldest_key]
+            self._cuda_graph_cache[self._captured_encoder_seq_len] = self._cuda_graph
         print('[Triton Inference] CUDA Graph recorded successfully!')
 
     def _triton_forward(self, images_nhwc, prompt_embeds, prompt_len,
@@ -496,19 +575,60 @@ class PI05FlowMatchingInference(PI05FlowMatching):
         Returns:
             Denoised actions [chunk_size, 32] bfloat16.
         """
+        profile = self._pi05_profile
+        profile_start = torch.cuda.Event(enable_timing=True) if profile else None
+        profile_after_copy = torch.cuda.Event(enable_timing=True) if profile else None
+        profile_before_replay = torch.cuda.Event(enable_timing=True) if profile else None
+        profile_after_replay = torch.cuda.Event(enable_timing=True) if profile else None
+        if profile:
+            profile_start.record()
+
         self._triton_bufs['observation_images_normalized'].copy_(images_nhwc)
         start = self.num_views * 256
+        active_encoder_seq_len = start + prompt_len
+        if self._use_flashrt_fa2:
+            cached_graph = self._cuda_graph_cache.get(active_encoder_seq_len)
+            if cached_graph is not None:
+                self._cuda_graph = cached_graph
+                self._cuda_graph_ready = True
+                self._captured_encoder_seq_len = active_encoder_seq_len
+            elif self._captured_encoder_seq_len != active_encoder_seq_len:
+                self._cuda_graph = None
+                self._cuda_graph_ready = False
+                self._captured_encoder_seq_len = None
+            self._active_encoder_seq_len = active_encoder_seq_len
         self._triton_bufs['encoder_x'][start:start +
                                        prompt_len].copy_(prompt_embeds)
-        self._triton_bufs['valid_encoder_len'].fill_(start + prompt_len)
+        self._triton_bufs['valid_encoder_len'].fill_(active_encoder_seq_len)
         self._triton_bufs['decoder_rope_weights'].copy_(
             self._get_decoder_rope_weights(prompt_len))
         self._triton_bufs['diffusion_noise'].copy_(diffusion_noise)
+        if profile:
+            profile_after_copy.record()
 
+        built_graph = False
         if not self._cuda_graph_ready:
             self._build_cuda_graph()
+            built_graph = True
 
+        if profile:
+            profile_before_replay.record()
         self._cuda_graph.replay()
+        if profile:
+            profile_after_replay.record()
+            profile_after_replay.synchronize()
+            self._pi05_profile_count += 1
+            if self._pi05_profile_count % self._pi05_profile_interval == 0:
+                print(
+                    '[PI05Profile] '
+                    f'prompt_len={prompt_len}  '
+                    f'graph_len={active_encoder_seq_len if self._use_flashrt_fa2 else self._encoder_seq_len}  '
+                    f'graph_cache={len(self._cuda_graph_cache)}  '
+                    f'built_graph={int(built_graph)}  '
+                    f'buffer_copy={profile_start.elapsed_time(profile_after_copy):.2f}ms  '
+                    f'graph_ready_gap={profile_after_copy.elapsed_time(profile_before_replay):.2f}ms  '
+                    f'replay={profile_before_replay.elapsed_time(profile_after_replay):.2f}ms',
+                    flush=True)
         return self._triton_bufs['diffusion_noise']
 
     def predict_action(self,
@@ -529,14 +649,18 @@ class PI05FlowMatchingInference(PI05FlowMatching):
                 num_steps=self.num_steps)
             self._triton_ready = True
 
+        profile = self._pi05_profile
+        t0 = time.perf_counter() if profile else None
         pixel_values = images.unflatten(1, (-1, 3))[0]
         images_nhwc = pixel_values.permute(0, 2, 3, 1).contiguous().bfloat16()
+        t_images = time.perf_counter() if profile else None
 
         prompt_len = (
             int(lang_masks[0].sum().item())
             if lang_masks is not None else lang_tokens.shape[1])
         lang_emb = self.llm_backbone.embed_tokens(lang_tokens[0, :prompt_len])
         lang_emb = (lang_emb * math.sqrt(lang_emb.shape[-1])).bfloat16()
+        t_lang = time.perf_counter() if profile else None
 
         chunk_size = self.n_action_steps
         if noise is None:
@@ -554,10 +678,20 @@ class PI05FlowMatchingInference(PI05FlowMatching):
                 dtype=torch.bfloat16,
                 device=noise_t.device)
             noise_t = torch.cat([noise_t, pad], dim=-1)
+        t_noise = time.perf_counter() if profile else None
 
         denoised = self._triton_forward(images_nhwc, lang_emb, prompt_len,
                                         noise_t)
         result = denoised[:, :self.max_action_dim].unsqueeze(0).float()
+        if profile and self._pi05_profile_count % self._pi05_profile_interval == 0:
+            t_done = time.perf_counter()
+            print(
+                '[PI05HostProfile] '
+                f'image_format={(t_images - t0)*1000:.2f}ms  '
+                f'lang_embed={(t_lang - t_images)*1000:.2f}ms  '
+                f'noise_prep={(t_noise - t_lang)*1000:.2f}ms  '
+                f'triton_forward={(t_done - t_noise)*1000:.2f}ms',
+                flush=True)
 
         return result
 
@@ -653,6 +787,9 @@ class PI05FlowMatchingInference(PI05FlowMatching):
 
         self._init_buffers()
         self._init_rope_table()
+        if self._use_flashrt_fa2:
+            check_flashrt_fa2_available()
 
         self._cuda_graph = None
         self._cuda_graph_ready = False
+        self._captured_encoder_seq_len = None

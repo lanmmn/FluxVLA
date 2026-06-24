@@ -100,6 +100,7 @@ class BaseInferenceRunner:
                                      build_transform_from_cfg,
                                      build_vla_from_cfg)
 
+        startup_t0 = time.perf_counter()
         self.ckpt_path = ckpt_path
         self._use_remote = remote_inference is not None
 
@@ -119,11 +120,20 @@ class BaseInferenceRunner:
                 denormalize_action)
             dataset['norm_stats'] = data_stat_path
             dataset['model_path'] = os.path.dirname(os.path.dirname(ckpt_path))
+            stage_t0 = time.perf_counter()
             self.dataset = build_dataset_from_cfg(dataset)
+            overwatch.info(
+                f'[Startup] build_dataset: {time.perf_counter() - stage_t0:.1f}s'
+            )
 
+            stage_t0 = time.perf_counter()
             self.vla = build_vla_from_cfg(cfg.inference_model)
+            overwatch.info(
+                f'[Startup] build_vla: {time.perf_counter() - stage_t0:.1f}s'
+            )
             assert Path.exists(Path(ckpt_path)), \
                 f'Checkpoint path {ckpt_path} does not exist!'
+            stage_t0 = time.perf_counter()
             if ckpt_path.endswith('.safetensors'):
                 state_dict = load_file(ckpt_path, device='cpu')
             else:
@@ -132,7 +142,14 @@ class BaseInferenceRunner:
                     state_dict = checkpoint['model']
                 else:
                     state_dict = checkpoint
+            overwatch.info(
+                f'[Startup] load_checkpoint_to_cpu: {time.perf_counter() - stage_t0:.1f}s'
+            )
+            stage_t0 = time.perf_counter()
             self.vla.load_state_dict(state_dict, strict=True)
+            overwatch.info(
+                f'[Startup] load_state_dict: {time.perf_counter() - stage_t0:.1f}s'
+            )
         else:
             self.dataset = None
             self.denormalize_action = None
@@ -151,7 +168,11 @@ class BaseInferenceRunner:
         self.task_suite_name = task_suite_name
 
         # Initialize ROS operator and observation window
+        stage_t0 = time.perf_counter()
         self.ros_operator = build_operator_from_cfg(operator)
+        overwatch.info(
+            f'[Startup] build_ros_operator: {time.perf_counter() - stage_t0:.1f}s'
+        )
         self.observation_window = None
 
         # Initialize task configurations
@@ -167,6 +188,9 @@ class BaseInferenceRunner:
         # Becomes _prev_ctx in the next iteration for cross-chunk continuity.
         self._prev_ctx = None
         self._action_ctx = SimpleNamespace()
+        overwatch.info(
+            f'[Startup] BaseInferenceRunner.__init__ total: {time.perf_counter() - startup_t0:.1f}s'
+        )
 
     def _init_zmq_client(self, cfg: Dict):
         """Initialize ZMQ client for remote inference.
@@ -349,14 +373,19 @@ class BaseInferenceRunner:
                 self._action_ctx = SimpleNamespace()
                 self._action_ctx.instruction = instruction
                 inputs = self._preprocess(instruction)
-
+                
+                import time
+                torch.cuda.synchronize()
+                start = time.time()
                 with torch.autocast(
                         'cuda',
                         dtype=self.mixed_precision_dtype,
                         enabled=(self.enable_mixed_precision
                                  and not self._use_remote)):
+                    
                     raw_action = self._predict_action(inputs)
                 actions = self._postprocess_actions(raw_action)
+                print("actions :", actions)
                 self._execute_actions(actions, rate)
 
                 self._prev_ctx = self._action_ctx
@@ -530,7 +559,23 @@ class BaseInferenceRunner:
             self.execute_task_pose(task_id)
             input('Enter task ID (or press Enter for default): ').strip()
 
-        num_times = int(input('Number of times to repeat the task: '))
+        while True:
+            repeat_text = input(
+                'Number of times to repeat the task (default 1): ').strip()
+            if repeat_text == '':
+                num_times = 1
+                break
+            try:
+                num_times = int(repeat_text)
+            except ValueError:
+                print(
+                    f'Invalid repeat count: {repeat_text!r}. Please enter an integer.'
+                )
+                continue
+            if num_times < 1:
+                print('Repeat count must be >= 1.')
+                continue
+            break
         task_description = self._get_task_description(task_id)
         return [task_description] * num_times
 

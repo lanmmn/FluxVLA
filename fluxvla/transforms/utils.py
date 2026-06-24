@@ -41,8 +41,16 @@ import torchvision.transforms.functional as TVF
 from PIL import Image as PILImage
 from PIL.Image import Image
 from timm.models.vision_transformer import Block, VisionTransformer
-from torch.distributed.fsdp.wrap import (_module_wrap_policy, _or_policy,
-                                         transformer_auto_wrap_policy)
+try:
+    from torch.distributed.fsdp.wrap import (_module_wrap_policy, _or_policy,
+                                             transformer_auto_wrap_policy)
+except ModuleNotFoundError as exc:
+    _module_wrap_policy = None
+    _or_policy = None
+    transformer_auto_wrap_policy = None
+    _FSDP_WRAP_IMPORT_ERROR = exc
+else:
+    _FSDP_WRAP_IMPORT_ERROR = None
 from torchvision.transforms import Compose, Resize
 
 
@@ -220,6 +228,11 @@ class VisionBackbone(nn.Module, ABC):
         ...
 
 
+def _require_fsdp_wrap_support() -> None:
+    if _FSDP_WRAP_IMPORT_ERROR is not None:
+        raise RuntimeError('FSDP wrapping policies are unavailable in this torch build') from _FSDP_WRAP_IMPORT_ERROR
+
+
 class TimmViTBackbone(VisionBackbone, ABC):
     """
     A base class for Vision Transformers using the TIMM library.
@@ -332,6 +345,7 @@ class TimmViTBackbone(VisionBackbone, ABC):
         Callable
             Policy function used in `FullyShardedDataParallel`.
         """
+        _require_fsdp_wrap_support()
         vit_wrap_policy = partial(
             _module_wrap_policy, module_classes={VisionTransformer})
         transformer_block_policy = partial(
