@@ -32,14 +32,14 @@ This script builds a reusable `flash-attn 2.5.5` SM87 wheel under:
 
 The FA image build now prefers installing from a staged wheel in `docker/.wheelhouse/` and only falls back to source compilation when no wheel is available.
 
-### Step 2. Split images by responsibility
+### Step 2. Split image targets by responsibility
 
-Add separate Dockerfiles and manage them through the unified build script:
+Use one multi-stage Dockerfile and manage the staged targets through the unified build script:
 
-- `docker/Dockerfile.orin.base`
-- `docker/Dockerfile.orin.fa`
-- `docker/Dockerfile.orin.ros`
-- `docker/Dockerfile.orin.ros-fa`
+- `docker/Dockerfile.orin --target base`
+- `docker/Dockerfile.orin --target fa`
+- `docker/Dockerfile.orin --target ros`
+- `docker/Dockerfile.orin --target ros-fa`
 - `docker/build_docker.sh base`
 - `docker/build_docker.sh fa`
 - `docker/build_docker.sh ros`
@@ -62,10 +62,10 @@ This isolates the expensive parts:
 
 ### Step 3. Reuse ROS as a separate image layer
 
-`Dockerfile.orin.ros-fa` does not rebuild ROS. It copies `/opt/ros/noetic` from a separately built `fluxvla:orin-ros` image:
+The `ros-fa` Dockerfile target does not rebuild ROS. It copies `/opt/ros/noetic` from the `ros` stage:
 
 ```text
-COPY --from=fluxvla:orin-ros /opt/ros/noetic /opt/ros/noetic
+COPY --from=ros_layer /opt/ros/noetic /opt/ros/noetic
 ```
 
 That turns the combined ROS+FA image into a cheap composition step once both inputs already exist.
@@ -119,11 +119,8 @@ Custom mirrors still work through:
 
 ## Compatibility Notes
 
-- The original monolithic path is kept intact:
-  - `docker/Dockerfile.orin`
-  - `docker/build_docker.sh legacy`
-- `docker/run_docker.sh` defaults to the recommended `fluxvla:orin-ros-fa` image; old single-image runs can still be selected with `FLUXVLA_IMAGE=fluxvla:orin`
-- the new refactor does not change runtime semantics by itself; it only changes how images are built and reused
+- `docker/run_docker.sh` defaults to the recommended `fluxvla:orin-ros-fa` image.
+- The refactor does not change runtime semantics by itself; it only changes how images are built and reused.
 
 ## Expected Benefits
 
@@ -145,7 +142,7 @@ Custom mirrors still work through:
 The repository now contains:
 
 - reusable FA wheel build path
-- separated base / FA / ROS / ROS+FA Docker images
+- one multi-stage `docker/Dockerfile.orin` with base / FA / ROS / ROS+FA targets
 - unified build entrypoint `docker/build_docker.sh`
 - process documentation in this file
 

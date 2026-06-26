@@ -166,21 +166,13 @@ docker/build_docker.sh ros        # 只构建 fluxvla:orin-ros
 docker/build_docker.sh ros-fa     # 只构建 fluxvla:orin-ros-fa
 ```
 
-旧单镜像构建功能没有删除，改为统一入口的 legacy target：
-
-```bash
-docker/build_docker.sh legacy
-docker/build_docker.sh legacy-ros
-```
-
-`legacy` 表示“旧版兼容模式”：`legacy` 等价于原来的单 Dockerfile `fluxvla:orin` 构建，`legacy-ros` 等价于原来的单 Dockerfile + ROS `fluxvla:orin-ros` 构建。它们用于保留旧版本、回滚或排查差异；日常 Orin 真机部署优先使用默认的分层构建 `docker/build_docker.sh`。
+这些 target 由同一个 multi-stage Dockerfile 管理：`docker/Dockerfile.orin`。
 
 发布版本号作为第二个参数：
 
 ```bash
 docker/build_docker.sh all 1.0.0
 docker/build_docker.sh ros-fa 1.0.0
-docker/build_docker.sh legacy 1.0.0
 ```
 
 对应版本标签示例：
@@ -234,7 +226,6 @@ flash-attn 在 Orin 上编译耗时较长。默认只使用 1 个编译 job，�
 
 ```bash
 FLUXVLA_FLASH_ATTN_MAX_JOBS=2 docker/build_docker.sh all
-FLUXVLA_FLASH_ATTN_MAX_JOBS=2 docker/build_docker.sh legacy
 ```
 
 如果构建时 `ports.ubuntu.com` 或 PyPI 网络不稳定，可以临时启用国内源。该开关只影响构建过程，不改变运行容器的网络配置：
@@ -264,15 +255,15 @@ docker/build_docker.sh all
 
 ```bash
 docker/build_docker.sh all 1.0.0
-docker/build_docker.sh legacy 1.0.0
-docker/build_docker.sh legacy-ros 1.0.0
 ```
 
 对应产出：
 
 ```text
-fluxvla:orin-1.0.0
+fluxvla:orin-base-1.0.0
+fluxvla:orin-fa-1.0.0
 fluxvla:orin-ros-1.0.0
+fluxvla:orin-ros-fa-1.0.0
 ```
 
 验证 ROS 镜像：

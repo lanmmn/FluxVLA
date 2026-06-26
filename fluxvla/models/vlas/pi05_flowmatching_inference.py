@@ -15,9 +15,6 @@ from fluxvla.ops.atomic_ops import (AttnMultiKey, adarms_norm_style_proj,
                                     matmul_qkv_rope, matmul_res,
                                     matmul_res_gate, matmul_split_k_bias_res,
                                     rms_matmul_gate, rms_matmul_qkv_rope)
-from fluxvla.ops.flashrt_fa2 import (check_flashrt_fa2_available,
-                                     pi05_decoder_attention,
-                                     pi05_encoder_attention)
 from fluxvla.ops.triton.attention_triton_ops import (
     matmul_abT_scale, softmax_kernel_masklen, softmax_kernel_prefix_suffix)
 # yapf: enable
@@ -104,12 +101,7 @@ def transformer_encoder(weights,
 
         if i != num_encoder_layers - 1:
             if use_flashrt_fa2:
-                encoder_ctx = pi05_encoder_attention(
-                    buffers['encoder_Q'], buffers['encoder_K'][i],
-                    buffers['encoder_V'][i], buffers['encoder_fa2_o'],
-                    buffers['encoder_fa2_lse'],
-                    buffers['encoder_fa2_lse_accum'],
-                    buffers['encoder_fa2_o_accum'], encoder_seq_len)
+                raise RuntimeError('FlashRT FA2 path has been removed from FluxVLA mainline')
             else:
                 scale = 1.0 / (256**0.5)
                 total_queries = buffers['encoder_Q'].shape[0]
@@ -231,12 +223,7 @@ def transformer_decoder(weights,
             total_keys = prefix_keys + suffix_keys
 
             if use_flashrt_fa2:
-                decoder_ctx = pi05_decoder_attention(
-                    buffers['decoder_q_buf'], buffers['encoder_K'][i],
-                    buffers['encoder_V'][i], buffers['decoder_fa2_o'],
-                    buffers['decoder_fa2_lse'],
-                    buffers['decoder_fa2_lse_accum'],
-                    buffers['decoder_fa2_o_accum'], seq_len, total_keys)
+                raise RuntimeError('FlashRT FA2 path has been removed from FluxVLA mainline')
             else:
                 matmul_abT_scale[(((total_queries + 31) // 32) *
                                   ((total_keys + 31) // 32), )](
@@ -379,7 +366,7 @@ class PI05FlowMatchingInference(PI05FlowMatching):
         self._triton_ready = False
         self._cuda_graph = None
         self._cuda_graph_ready = False
-        self._use_flashrt_fa2 = os.environ.get('FLUXVLA_PI05_FA2', '0') == '1'
+        self._use_flashrt_fa2 = False
         self._active_encoder_seq_len = None
         self._captured_encoder_seq_len = None
         self._cuda_graph_cache = {}
@@ -787,9 +774,6 @@ class PI05FlowMatchingInference(PI05FlowMatching):
 
         self._init_buffers()
         self._init_rope_table()
-        if self._use_flashrt_fa2:
-            check_flashrt_fa2_available()
-
         self._cuda_graph = None
         self._cuda_graph_ready = False
         self._captured_encoder_seq_len = None

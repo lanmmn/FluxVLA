@@ -41,10 +41,9 @@ RLException: Invalid <param> tag: Cannot load command parameter [rosversion]: no
 
 1. `fluxvla/__init__.py` treated `robosuite` as a mandatory top-level dependency. UR3 inference does not require RoboCasa/robosuite, so this blocked non-RoboCasa deployment paths.
 
-2. The top-level package version check only accepted `transformers==5.3.0`, while the Orin-specific dependency files pin `transformers==4.53.2`:
+2. The top-level package version check only accepted `transformers==5.3.0`, while the Orin-specific Docker dependency file pins `transformers==4.53.2`:
 
 ```text
-requirements_orin.txt: transformers==4.53.2
 requirements_orin_notorch.txt: transformers==4.53.2
 requirements.txt: transformers==5.3.0
 ```

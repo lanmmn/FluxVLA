@@ -121,8 +121,6 @@ docker/build_docker.sh
 
 ```text
 fluxvla:orin-base
-fluxvla:orin-fa
-fluxvla:orin-ros
 fluxvla:orin-ros-fa
 ```
 
@@ -132,7 +130,7 @@ FlashAttention wheel 默认写到：
 /mnt/nvme/fluxvla-wheels
 ```
 
-> 若只需要 FlashAttention 或需要重新编译 SM87 wheel：
+> 若需要重新编译 FlashAttention SM87 wheel：
 
 ```bash
 docker/build_docker.sh wheel
@@ -140,14 +138,15 @@ docker/build_docker.sh fa
 docker/build_docker.sh ros-fa
 ```
 
-> 若只需要 ROS 层：
+> 若需要重新编译 ROS 层：
 
 ```bash
 docker/build_docker.sh ros
 docker/build_docker.sh ros-fa
 ```
 
-只改 Python 源码：通常不需要重建镜像，因为 `docker/run_docker.sh` 会 bind mount 当前源码到 `/workspace/FluxVLA`。重启 Python 进程即可读到新代码。
+FluxVLA 源码跟随：
+无需重新重新编译镜像和容器， `docker/run_docker.sh` bind mount 当前源码到 `/workspace/FluxVLA`。修改 Orin 本地源码（如：/workspace/FluxVLA）即可同步修改容器内源码。
 
 
 分层关系如下：
@@ -215,12 +214,12 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
 
 | 类别 | 自动处理内容 |
 | --- | --- |
-| Docker 运行参数 | `--runtime=nvidia`、`--network=host`、`--ipc=host`、`--shm-size=16g` |
-| Python / 推理环境 | `PYTHONPATH=/workspace/FluxVLA`、`WANDB_MODE=disabled` |
-| Attention 配置 | `ATTN_IMPLEMENTATION` 默认 `flash_attention_2`；`TRANSFORMERS_ATTN_IMPLEMENTATION` 默认跟随 `ATTN_IMPLEMENTATION` |
-| 目录挂载 | 仓库根目录挂到 `/workspace/FluxVLA`； |
-| Robotiq 消息包 | 若存在 `~/robotiq_pkg/robotiq`，挂到 `/opt/ros/noetic/lib/python3/dist-packages/robotiq:ro` |
-| ROS 网络变量 | 若宿主机设置了 `ROS_MASTER_URI`、`ROS_IP` 或 `ROS_HOSTNAME`，自动透传到容器 |
+| Docker 运行参数 | --runtime=nvidia、--network=host、--ipc=host、--shm-size=16g |
+| Python / 推理环境 | PYTHONPATH=/workspace/FluxVLA、WANDB_MODE=disabled |
+| Attention 配置 | ATTN_IMPLEMENTATION 默认 flash_attention_2；TRANSFORMERS_ATTN_IMPLEMENTATION 默认跟随 ATTN_IMPLEMENTATION |
+| 目录挂载 | 仓库根目录挂到 /workspace/FluxVLA； |
+| Robotiq 消息包 | 若存在 ~/robotiq_pkg/robotiq，挂到 /opt/ros/noetic/lib/python3/dist-packages/robotiq:ro |
+| ROS 网络变量 | 若宿主机设置了 ROS_MASTER_URI、ROS_IP 或 ROS_HOSTNAME，自动透传到容器 |
 
 临时回退 eager attention：
 
@@ -252,7 +251,7 @@ rm -f _mount_probe.txt /workspace/FluxVLA/_mount_probe.txt
 ### 5.1 镜像与容器基础状态
 
 ```bash
-cd /home/limx/sober/FluxVLA
+cd /home/<user>/FluxVLA
 docker images fluxvla
 
 FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
@@ -354,18 +353,18 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
 
 通过标准：`predict_action output shape` 出现，命令正常退出。
 
-### 5.7 Pi0.5 Triton 测试
+<!-- ### 5.7 Pi0.5 Triton 测试
 
 已有实测脚本可直接跑：
 
 ```bash
 FLUXVLA_IMAGE=fluxvla:orin-fa docker/run_docker.sh \
-  python3 /mnt/nvme/sober/tmp/pi05_triton_bench_real_100.py
+  python3 /home/<user>/FluxVLA/test/test_models/pi05_triton_bench_real_100.py
 ```
 
-首次运行可能录制 CUDA Graph，耗时较长。历史记录中 100-run mean latency 约在 `583-585 ms` 区间。
+首次运行可能录制 CUDA Graph，耗时较长。历史记录中 100-run mean latency 约在 `583-585 ms` 区间。 -->
 
-## 6. ROS / UR3 真机运行测试
+<!-- ## 6. ROS / UR3 真机运行测试
 
 ### 6.1 网络和 ROS 环境
 
@@ -423,9 +422,9 @@ cat /sys/class/net/eth0/speed
 ip route get 172.16.0.200
 ```
 
-Orin 物理网口名可能不是 `eth0`，按 `ip -br link` 结果替换。
+Orin 物理网口名可能不是 `eth0`，按 `ip -br link` 结果替换。 -->
 
-### 6.2 真机推理命令
+<!-- ### 6.2 真机推理命令
 
 必须在 `/workspace/FluxVLA` 下运行，因为配置中的模型目录包含相对路径。
 
@@ -468,7 +467,7 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
   bash -lc 'python3 -m pip install -q defusedxml >/dev/null 2>&1 || true; exec rosmaster --core -p 11311'
 ```
 
-长期修复应放在 ROS 镜像层：补齐 `defusedxml`，并保证 `rosversion` / `roslaunch` 命令环境完整，使普通 `roscore` 可直接工作。
+长期修复应放在 ROS 镜像层：补齐 `defusedxml`，并保证 `rosversion` / `roslaunch` 命令环境完整，使普通 `roscore` 可直接工作。 -->
 
 ## 7. 近期调试结论
 
