@@ -374,9 +374,6 @@ class BaseInferenceRunner:
                 self._action_ctx.instruction = instruction
                 inputs = self._preprocess(instruction)
                 
-                import time
-                torch.cuda.synchronize()
-                start = time.time()
                 with torch.autocast(
                         'cuda',
                         dtype=self.mixed_precision_dtype,
@@ -384,8 +381,8 @@ class BaseInferenceRunner:
                                  and not self._use_remote)):
                     
                     raw_action = self._predict_action(inputs)
+                torch.cuda.synchronize()
                 actions = self._postprocess_actions(raw_action)
-                print("actions :", actions)
                 self._execute_actions(actions, rate)
 
                 self._prev_ctx = self._action_ctx
