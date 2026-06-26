@@ -10,15 +10,14 @@ Run inside ``fluxvla:orin``::
     python scripts/profile_pi05_phases.py
 """
 import statistics
-import time
 
 import torch
+import yaml
 
 from fluxvla.engines import set_seed_everywhere
 from fluxvla.models.vlas import pi05_flowmatching_inference as P
-from scripts.test_pi05_encoder_int8_e2e import build_model
 from scripts.test_pi05_dummy_forward import _make_dummy_batch
-import yaml
+from scripts.test_pi05_encoder_int8_e2e import build_model
 
 CFG_PATH = '/mnt/nvme/sober/checkpoints/pi05_aloha_fold_towel/config.yaml'
 
@@ -50,14 +49,19 @@ def main():
     raw = yaml.safe_load(open(CFG_PATH, 'r'))
     nv = len(raw['inference']['dataset']['img_keys'])
     vla = build_model(True, device)
-    print(f'int8 cfg: o={vla._int8_o} mlp={vla._int8_mlp} down={vla._int8_down}')
+    print(
+        f'int8 cfg: o={vla._int8_o} mlp={vla._int8_mlp} down={vla._int8_down}')
 
     vocab = int(getattr(vla.llm_backbone.config, 'vocab_size', 257152))
     batch = _make_dummy_batch(
-        device=device, batch_size=1, num_views=nv, image_size=224,
+        device=device,
+        batch_size=1,
+        num_views=nv,
+        image_size=224,
         lang_len=min(32, int(vla.triton_max_prompt_len)),
         max_action_dim=int(vla.max_action_dim),
-        n_action_steps=int(vla.n_action_steps), vocab_size=vocab)
+        n_action_steps=int(vla.n_action_steps),
+        vocab_size=vocab)
 
     # Warm up the full pipeline once: prepares triton weights, fills buffers,
     # autotunes kernels, builds the CUDA graph.
@@ -65,9 +69,12 @@ def main():
         with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             for _ in range(3):
                 _ = vla.predict_action(
-                    images=batch['images'], lang_tokens=batch['lang_tokens'],
-                    states=batch['states'], img_masks=batch['img_masks'],
-                    lang_masks=batch['lang_masks'], noise=batch['noise'])
+                    images=batch['images'],
+                    lang_tokens=batch['lang_tokens'],
+                    states=batch['states'],
+                    img_masks=batch['img_masks'],
+                    lang_masks=batch['lang_masks'],
+                    noise=batch['noise'])
     torch.cuda.synchronize()
 
     w = vla._triton_weights

@@ -67,28 +67,37 @@ requirements.txt: transformers==5.3.0
 The following files were modified in the local `FluxVLA` worktree:
 
 - `fluxvla/__init__.py`
+
   - Made `robosuite` optional at top level.
   - Kept robosuite version checks when it is installed.
   - Accepted both `transformers==4.53.x` and `transformers==5.3.0`.
 
 - `fluxvla/engines/utils/eval_utils.py`
+
   - Removed top-level LIBERO imports.
   - Kept LIBERO imports inside `get_libero_env()`, where they are actually needed.
 
 - `scripts/inference_real_robot.py`
+
   - Replaced full `import fluxvla.models` with targeted imports for the UR3 GR00T inference components.
 
 - `fluxvla/engines/runners/__init__.py`
+
   - Fixed the skipped-import warning message so it prints the real exception instead of the literal `{e}`.
 
 - `fluxvla/models/backbones/__init__.py`
+
 - `fluxvla/models/backbones/vlms/__init__.py`
+
 - `fluxvla/models/heads/__init__.py`
+
 - `fluxvla/models/vlas/__init__.py`
+
   - Added narrow handling for optional `torch.distributed` / `torch._C._distributed_c10d` import failures.
   - Kept non-distributed import errors visible.
 
 - `fluxvla/engines/operators/ur_operator.py`
+
   - Made camera-info collection non-fatal.
   - Missing camera-info topics now log warnings and inference initialization continues.
 

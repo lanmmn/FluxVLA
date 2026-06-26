@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
+
 try:
     from torch.distributed.fsdp.wrap import _module_wrap_policy, _or_policy
 except ModuleNotFoundError as exc:
@@ -483,7 +484,9 @@ class OpenVLA(BaseVLA):
             Callable: The wrapping policy for FSDP.
         """
         if _FSDP_WRAP_IMPORT_ERROR is not None:
-            raise RuntimeError('FSDP wrapping policies are unavailable in this torch build') from _FSDP_WRAP_IMPORT_ERROR
+            raise RuntimeError(
+                'FSDP wrapping policies are unavailable in this torch build'
+            ) from _FSDP_WRAP_IMPORT_ERROR
         fsdp_policy_list = list()
         if hasattr(self, 'vision_backbone') and hasattr(
                 self.vision_backbone, 'get_fsdp_wrapping_policy'):

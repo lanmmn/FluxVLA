@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from pathlib import Path
 import os
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import torch
@@ -237,8 +237,7 @@ class LlavaVLA(OpenVLA):
             backbone_end.record()
             head_start.record()
 
-        _debug_tensor_summary('llava_vla.last_hidden_state',
-                              last_hidden_state)
+        _debug_tensor_summary('llava_vla.last_hidden_state', last_hidden_state)
 
         pred_actions = self.vla_head.predict_action(
             input_features=last_hidden_state,

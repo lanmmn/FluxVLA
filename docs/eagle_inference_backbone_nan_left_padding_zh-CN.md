@@ -1,7 +1,7 @@
 # EagleInferenceBackbone 输出 NaN 问题记录
 
-> 日期：2026-06-23  
-> 场景：Jetson Orin / FluxVLA Docker / GR00T Eagle UR3 真机推理  
+> 日期：2026-06-23\
+> 场景：Jetson Orin / FluxVLA Docker / GR00T Eagle UR3 真机推理\
 > 现象：`actions` 全部为 `nan`
 
 ## 1. 现象

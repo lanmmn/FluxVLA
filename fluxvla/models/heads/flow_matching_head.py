@@ -18,6 +18,7 @@ from typing import Callable, Dict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 try:
     from torch.distributed.fsdp.wrap import _module_wrap_policy
 except ModuleNotFoundError as exc:
@@ -550,7 +551,9 @@ class FlowMatchingHead(nn.Module):
         Returns a function used to determine which modules to wrap with FSDP.
         """
         if _FSDP_WRAP_IMPORT_ERROR is not None:
-            raise RuntimeError('FSDP wrapping policies are unavailable in this torch build') from _FSDP_WRAP_IMPORT_ERROR
+            raise RuntimeError(
+                'FSDP wrapping policies are unavailable in this torch build'
+            ) from _FSDP_WRAP_IMPORT_ERROR
         return partial(
             _module_wrap_policy,
             module_classes=set([SelfAttentionTransformer, DiT]),

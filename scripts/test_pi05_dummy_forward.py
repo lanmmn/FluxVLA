@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """PI05FlowMatching 干跑：随机张量输入 + 可选加载微调 safetensors。
 
 示例::
@@ -29,7 +28,6 @@
 """
 
 from __future__ import annotations
-
 import argparse
 import statistics
 import sys
@@ -57,7 +55,8 @@ def _parse_args() -> argparse.Namespace:
         '--ckpt',
         type=str,
         default=None,
-        help='微调权重：可为具体 .safetensors 文件，或训练根目录（自动在该目录或 checkpoints/ 下选一份 .safetensors）。',
+        help=('微调权重：可为具体 .safetensors 文件，或训练根目录'
+              '（自动在该目录或 checkpoints/ 下选一份 .safetensors）。'),
     )
     p.add_argument(
         '--run-dir',
@@ -83,7 +82,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         '--strict-load',
         action='store_true',
-        help='load_state_dict(strict=True)；默认 strict=False 并打印 missing/unexpected 数量。',
+        help=('load_state_dict(strict=True)；默认 strict=False 并打印 '
+              'missing/unexpected 数量。'),
     )
     p.add_argument(
         '--predict-runs',
@@ -124,7 +124,8 @@ def _resolve_ckpt(args: argparse.Namespace) -> Path | None:
         picked = _pick_safetensors_in_dir(p)
         return picked
     if args.run_dir:
-        return _pick_safetensors_in_dir(Path(args.run_dir).expanduser().resolve())
+        return _pick_safetensors_in_dir(
+            Path(args.run_dir).expanduser().resolve())
     return None
 
 
@@ -164,8 +165,10 @@ def _make_dummy_batch(
         device=device,
         dtype=torch.long,
     )
-    lang_masks = torch.ones(batch_size, lang_len, dtype=torch.bool, device=device)
-    states = torch.randn(batch_size, max_action_dim, device=device, dtype=torch.float32)
+    lang_masks = torch.ones(
+        batch_size, lang_len, dtype=torch.bool, device=device)
+    states = torch.randn(
+        batch_size, max_action_dim, device=device, dtype=torch.float32)
     noise = torch.randn(
         batch_size,
         n_action_steps,
@@ -186,7 +189,10 @@ def _make_dummy_batch(
 def _embed_prefix_forward_only(vla, batch: dict, device: torch.device) -> None:
     """可选：走 embed_prefix + embed_suffix + forward_model（与单元测试路径一致）。"""
     images = batch['images']
-    with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == 'cuda'):
+    with torch.autocast(
+            device_type=device.type,
+            dtype=torch.bfloat16,
+            enabled=device.type == 'cuda'):
         prefix_embs, prefix_pad, prefix_att = vla.embed_prefix(
             images=images,
             lang_tokens=batch['lang_tokens'],
@@ -194,7 +200,7 @@ def _embed_prefix_forward_only(vla, batch: dict, device: torch.device) -> None:
             lang_masks=batch['lang_masks'],
         )
         time = torch.full(
-            (images.shape[0],),
+            (images.shape[0], ),
             0.5,
             device=device,
             dtype=torch.float32,
@@ -343,8 +349,7 @@ def main() -> int:
     n_warmup = max(0, int(args.warmup))
     print(
         f'Benchmark predict_action: warmup={n_warmup}, runs={n_runs} '
-        f'(dummy tensors)...',
-    )
+        f'(dummy tensors)...', )
     times_sec, actions = _bench_predict_action(
         vla,
         batch,
@@ -367,8 +372,7 @@ def main() -> int:
     total = sum(times_sec)
     print(
         f'total_wall_predict={total*1000:.3f} ms '
-        f'({n_runs} runs, excl. warmup)',
-    )
+        f'({n_runs} runs, excl. warmup)', )
 
     print('Running embed_prefix + forward_model slice (dummy tensors)...')
     with torch.inference_mode():

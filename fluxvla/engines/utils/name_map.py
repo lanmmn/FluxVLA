@@ -45,7 +45,9 @@ def str_to_dtype(s: str):
 
 def state_dict_type_map(s: str):
     if StateDictType is None:
-        raise RuntimeError('FSDP state-dict types are unavailable in this torch build') from _FSDP_IMPORT_ERROR
+        raise RuntimeError(
+            'FSDP state-dict types are unavailable in this torch build'
+        ) from _FSDP_IMPORT_ERROR
     if s == 'full_state_dict':
         return StateDictType.FULL_STATE_DICT
     if s == 'local_state_dict':

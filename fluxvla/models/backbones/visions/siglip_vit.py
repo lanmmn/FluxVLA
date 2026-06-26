@@ -17,6 +17,7 @@ from typing import Callable, Dict, Tuple
 
 import torch
 from timm.models.vision_transformer import Block, VisionTransformer
+
 try:
     from torch.distributed.fsdp.wrap import (_module_wrap_policy, _or_policy,
                                              transformer_auto_wrap_policy)
@@ -66,7 +67,9 @@ class SigLIPViTBackbone(VisionBackbone):
             Callable: A composite policy for FSDP module wrapping.
         """
         if _FSDP_WRAP_IMPORT_ERROR is not None:
-            raise RuntimeError('FSDP wrapping policies are unavailable in this torch build') from _FSDP_WRAP_IMPORT_ERROR
+            raise RuntimeError(
+                'FSDP wrapping policies are unavailable in this torch build'
+            ) from _FSDP_WRAP_IMPORT_ERROR
         vit_wrap_policy = partial(
             _module_wrap_policy, module_classes={VisionTransformer})
         transformer_block_policy = partial(

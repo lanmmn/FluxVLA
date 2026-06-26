@@ -205,14 +205,14 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
 
 `docker/run_docker.sh` fills in runtime arguments, environment variables, and common mounts:
 
-| Category | Automatic handling |
-| --- | --- |
-| Docker runtime args | `--runtime=nvidia`, `--network=host`, `--ipc=host`, `--shm-size=16g` |
-| Python / inference environment | `PYTHONPATH=/workspace/FluxVLA`, `WANDB_MODE=disabled` |
-| Attention configuration | `ATTN_IMPLEMENTATION` defaults to `flash_attention_2`; `TRANSFORMERS_ATTN_IMPLEMENTATION` follows `ATTN_IMPLEMENTATION` by default |
-| Directory mounts | Repository root mounted to `/workspace/FluxVLA` |
-| Robotiq message package | If `~/robotiq_pkg/robotiq` exists, it is mounted read-only to `/opt/ros/noetic/lib/python3/dist-packages/robotiq` |
-| ROS network variables | If the host has `ROS_MASTER_URI`, `ROS_IP`, or `ROS_HOSTNAME`, they are passed through to the container |
+| Category                       | Automatic handling                                                                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Docker runtime args            | `--runtime=nvidia`, `--network=host`, `--ipc=host`, `--shm-size=16g`                                                               |
+| Python / inference environment | `PYTHONPATH=/workspace/FluxVLA`, `WANDB_MODE=disabled`                                                                             |
+| Attention configuration        | `ATTN_IMPLEMENTATION` defaults to `flash_attention_2`; `TRANSFORMERS_ATTN_IMPLEMENTATION` follows `ATTN_IMPLEMENTATION` by default |
+| Directory mounts               | Repository root mounted to `/workspace/FluxVLA`                                                                                    |
+| Robotiq message package        | If `~/robotiq_pkg/robotiq` exists, it is mounted read-only to `/opt/ros/noetic/lib/python3/dist-packages/robotiq`                  |
+| ROS network variables          | If the host has `ROS_MASTER_URI`, `ROS_IP`, or `ROS_HOSTNAME`, they are passed through to the container                            |
 
 Temporarily fall back to eager attention:
 
@@ -333,10 +333,10 @@ Pass criteria: `predict_action output shape` appears and the command exits norma
 
 This benchmark uses the same script to test both the baseline and accelerated paths. Dummy language tokens construct image placeholder tokens for two image streams, so visual features are inserted into the language sequence and the benchmark matches the real inference path more closely.
 
-| Variant | Config source | Component path | Description |
-| --- | --- | --- | --- |
-| baseline | `cfg.model` | `EagleBackbone + FlowMatchingHead` | Normal inference path, used as the control |
-| accelerated | `cfg.inference_model` | `EagleInferenceBackbone + FlowMatchingInferenceHead` | Triton / CUDA Graph accelerated path |
+| Variant     | Config source         | Component path                                       | Description                                |
+| ----------- | --------------------- | ---------------------------------------------------- | ------------------------------------------ |
+| baseline    | `cfg.model`           | `EagleBackbone + FlowMatchingHead`                   | Normal inference path, used as the control |
+| accelerated | `cfg.inference_model` | `EagleInferenceBackbone + FlowMatchingInferenceHead` | Triton / CUDA Graph accelerated path       |
 
 Set the same checkpoint first:
 
@@ -383,10 +383,10 @@ OK
 
 Suggested result table:
 
-| Variant | Head | Backbone | Median latency | Frequency |
-| --- | --- | --- | --- | --- |
-| baseline | FlowMatchingHead | EagleBackbone | 256 ms | 3.9 Hz |
-| accelerated | FlowMatchingInferenceHead | EagleInferenceBackbone | 150-155 ms | 6.5 Hz |
+| Variant     | Head                      | Backbone               | Median latency | Frequency |
+| ----------- | ------------------------- | ---------------------- | -------------- | --------- |
+| baseline    | FlowMatchingHead          | EagleBackbone          | 256 ms         | 3.9 Hz    |
+| accelerated | FlowMatchingInferenceHead | EagleInferenceBackbone | 150-155 ms     | 6.5 Hz    |
 
 ## 7. Issues and Troubleshooting Notes
 

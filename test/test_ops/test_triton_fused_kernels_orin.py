@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """
 Fused position embedding add inplacetriton kernel test on AGX jetson Orin platform,
 align with pytorch result, making sure exactly the same.
@@ -32,7 +31,8 @@ try:
 except ImportError:
     _TRITON_AVAILABLE = False
 
-from fluxvla.ops.triton.position_embedding import fused_position_embedding_add_inplace
+from fluxvla.ops.triton.position_embedding import \
+    fused_position_embedding_add_inplace
 
 
 class TestTritonOrin(unittest.TestCase):
@@ -42,12 +42,9 @@ class TestTritonOrin(unittest.TestCase):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
+    @pytest.mark.skipif(not _TRITON_AVAILABLE, reason='Triton not installed')
     @pytest.mark.skipif(
-        not _TRITON_AVAILABLE,
-        reason='Triton not installed')
-    @pytest.mark.skipif(
-        not torch.cuda.is_available(),
-        reason='No CUDA device available')
+        not torch.cuda.is_available(), reason='No CUDA device available')
     def test_fused_position_embedding_add_inplace(self):
         """fused position embedding add inplace triton kernel test"""
         torch.manual_seed(0)

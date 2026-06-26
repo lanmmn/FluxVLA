@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-
 import argparse
 import os
 import statistics
 import sys
 import time
 from pathlib import Path
-
 
 os.environ['ATTN_IMPLEMENTATION'] = 'flash_attention_2'
 os.environ['TRANSFORMERS_ATTN_IMPLEMENTATION'] = 'flash_attention_2'
@@ -21,7 +19,8 @@ torch.backends.cuda.enable_mem_efficient_sdp(True)
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description='GR00T baseline / accelerated inference benchmark')
+    p = argparse.ArgumentParser(
+        description='GR00T baseline / accelerated inference benchmark')
     p.add_argument('--config', required=True)
     p.add_argument('--ckpt', required=True)
     p.add_argument(
@@ -38,28 +37,47 @@ def parse_args():
     p.add_argument('--image-token-id', type=int, default=None)
     p.add_argument('--image-tokens-per-view', type=int, default=256)
     p.add_argument('--seed', type=int, default=0)
-    p.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
+    p.add_argument(
+        '--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     return p.parse_args()
 
 
-def make_dummy_lang_tokens(device, batch_size, lang_len, image_token_id, num_image_tokens):
+def make_dummy_lang_tokens(device, batch_size, lang_len, image_token_id,
+                           num_image_tokens):
     if num_image_tokens > lang_len:
-        raise ValueError(f'num_image_tokens={num_image_tokens} exceeds lang_len={lang_len}')
-    tokens = torch.randint(100, 32000, (batch_size, lang_len), device=device, dtype=torch.long)
+        raise ValueError(
+            f'num_image_tokens={num_image_tokens} exceeds lang_len={lang_len}')
+    tokens = torch.randint(
+        100, 32000, (batch_size, lang_len), device=device, dtype=torch.long)
     if image_token_id is not None and num_image_tokens > 0:
         tokens[:, :num_image_tokens] = int(image_token_id)
     return tokens
 
 
-def make_dummy_batch(device, batch_size, num_views, image_size, lang_len, state_dim, action_dim, image_token_id, image_tokens_per_view):
+def make_dummy_batch(device, batch_size, num_views, image_size, lang_len,
+                     state_dim, action_dim, image_token_id,
+                     image_tokens_per_view):
     num_image_tokens = num_views * image_tokens_per_view
     return {
-        'images': torch.randn(batch_size, num_views * 3, image_size, image_size, device=device, dtype=torch.float32),
-        'img_masks': torch.ones(batch_size, num_views, dtype=torch.bool, device=device),
-        'lang_tokens': make_dummy_lang_tokens(device, batch_size, lang_len, image_token_id, num_image_tokens),
-        'lang_masks': torch.ones(batch_size, lang_len, dtype=torch.bool, device=device),
-        'states': torch.randn(batch_size, state_dim, device=device, dtype=torch.float32),
-        'embodiment_ids': torch.zeros(batch_size, device=device, dtype=torch.long),
+        'images':
+        torch.randn(
+            batch_size,
+            num_views * 3,
+            image_size,
+            image_size,
+            device=device,
+            dtype=torch.float32),
+        'img_masks':
+        torch.ones(batch_size, num_views, dtype=torch.bool, device=device),
+        'lang_tokens':
+        make_dummy_lang_tokens(device, batch_size, lang_len, image_token_id,
+                               num_image_tokens),
+        'lang_masks':
+        torch.ones(batch_size, lang_len, dtype=torch.bool, device=device),
+        'states':
+        torch.randn(batch_size, state_dim, device=device, dtype=torch.float32),
+        'embodiment_ids':
+        torch.zeros(batch_size, device=device, dtype=torch.long),
     }
 
 
@@ -77,7 +95,9 @@ def load_checkpoint_state(ckpt_path: Path):
 def main() -> int:
     args = parse_args()
     if args.batch_size != 1:
-        print('ERROR: accelerated FlowMatchingInferenceHead currently uses fixed batch_size=1 buffers', file=sys.stderr)
+        print(
+            'ERROR: accelerated FlowMatchingInferenceHead currently uses fixed batch_size=1 buffers',
+            file=sys.stderr)
         return 1
 
     from fluxvla.engines import build_vla_from_cfg, set_seed_everywhere
@@ -107,7 +127,9 @@ def main() -> int:
     print(f'Loading weights: {ckpt_path}')
     state = load_checkpoint_state(ckpt_path)
     missing, unexpected = vla.load_state_dict(state, strict=False)
-    print(f'load_state_dict: missing={len(missing)}, unexpected={len(unexpected)}')
+    print(
+        f'load_state_dict: missing={len(missing)}, unexpected={len(unexpected)}'
+    )
     if missing:
         print('missing_samples:', missing[:20])
     if unexpected:
@@ -122,12 +144,22 @@ def main() -> int:
     action_dim = model_cfg['vla_head']['action_dim']
     image_token_id = args.image_token_id
     if image_token_id is None:
-        image_token_id = getattr(vla.vlm_backbone.vlm.config, 'image_token_index', None)
-    batch = make_dummy_batch(device, args.batch_size, args.num_views, args.image_size, args.lang_len, state_dim, action_dim, image_token_id, args.image_tokens_per_view)
-    image_token_count = int((batch['lang_tokens'] == image_token_id).sum().item()) if image_token_id is not None else 0
-    print(f'image_token_id={image_token_id}, image_token_count={image_token_count}')
+        image_token_id = getattr(vla.vlm_backbone.vlm.config,
+                                 'image_token_index', None)
+    batch = make_dummy_batch(device, args.batch_size, args.num_views,
+                             args.image_size, args.lang_len, state_dim,
+                             action_dim, image_token_id,
+                             args.image_tokens_per_view)
+    image_token_count = int(
+        (batch['lang_tokens']
+         == image_token_id).sum().item()) if image_token_id is not None else 0
+    print(
+        f'image_token_id={image_token_id}, image_token_count={image_token_count}'
+    )
 
-    print(f'Benchmark {args.variant} predict_action: warmup={args.warmup}, runs={args.predict_runs}, lang_len={args.lang_len}')
+    print(
+        f'Benchmark {args.variant} predict_action: warmup={args.warmup}, runs={args.predict_runs}, lang_len={args.lang_len}'
+    )
     times = []
     actions = None
     with torch.inference_mode():
@@ -147,12 +179,15 @@ def main() -> int:
 
     ms = [t * 1000.0 for t in times]
     print(f'predict_action output shape: {tuple(actions.shape)}')
-    print(f'latency_ms: min={min(ms):.3f} max={max(ms):.3f} mean={statistics.mean(ms):.3f} median={statistics.median(ms):.3f} stdev={statistics.stdev(ms) if len(ms) > 1 else 0:.3f}')
-    print(f'total_wall_predict={sum(times) * 1000.0:.3f} ms ({args.predict_runs} runs, excl. warmup)')
+    print(
+        f'latency_ms: min={min(ms):.3f} max={max(ms):.3f} mean={statistics.mean(ms):.3f} median={statistics.median(ms):.3f} stdev={statistics.stdev(ms) if len(ms) > 1 else 0:.3f}'
+    )
+    print(
+        f'total_wall_predict={sum(times) * 1000.0:.3f} ms ({args.predict_runs} runs, excl. warmup)'
+    )
     print('OK')
     return 0
 
 
 if __name__ == '__main__':
     raise SystemExit(main())
-

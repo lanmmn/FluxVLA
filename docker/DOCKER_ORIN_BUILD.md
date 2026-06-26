@@ -142,9 +142,11 @@ python3 scripts/test_gr00t_with_embodiment.py   --config configs/gr00t/gr00t_eag
 ## 注意事项
 
 1. 当前测试必须显式设置：
+
    - `PYTHONPATH=/home/limx/sober/FluxVLA`
 
 2. 当前测试必须挂载：
+
    - `-v /home/limx/sober:/home/limx/sober`
    - `-v /mnt/nvme:/mnt/nvme`
 
@@ -153,13 +155,13 @@ python3 scripts/test_gr00t_with_embodiment.py   --config configs/gr00t/gr00t_eag
 
 4. 当前 `/mnt/nvme/gr00t_eagle_3b_ur3_finetune_test_10241025/checkpoints/*.pt` 不能作为有效权重使用。
    如果要完成“带权重跑通”，需要满足下面任一条件：
+
    - 提供一份可被 `torch.load` 正常读取的 `.pt`
    - 提供对应的 `.safetensors`
    - 提供 `./checkpoints/GR00T-N1.5-3B` base model 目录，以及一份有效 finetune checkpoint
    - 或者提供 root 可读的原始 checkpoint 实际路径
 
 5. `run_docker.sh` 可以作为基础参考，但当前 GR00T 验证命令仍建议直接使用上文的 `docker run`，因为它明确包含了本次验证所需的 `PYTHONPATH` 和挂载路径。
-
 
 ## 2026-05-09 增量更新：Mayer catch_ball 权重验证
 
@@ -237,9 +239,8 @@ docker run --rm --runtime nvidia \
 2. `load_state_dict: missing=899, unexpected=5` 说明 repo 当前测试配置与这份 finetune checkpoint 不是完全逐键对齐，但当前 dummy 推理链路能实际跑通。
 3. 日志里有一条非致命 warning：
    - `The size of tensor a (0) must match the size of tensor b (512) ...`
-   这来自 dummy 输入路径中的 embedding 选择逻辑，但没有阻塞 `predict_action` 成功返回。
+     这来自 dummy 输入路径中的 embedding 选择逻辑，但没有阻塞 `predict_action` 成功返回。
 4. 如果后续要做真实数据或更严格精度验证，建议基于这份可用 checkpoint 继续做真实 observation/action 输入测试，而不是再用之前那批损坏权重。
-
 
 ## 2026-05-09 增量更新：Pi0.5 Triton backend 验证
 
@@ -399,7 +400,6 @@ docker run --rm --runtime nvidia \
 3. 若后续要做真实 Pi0.5 权重验证，需要继续在同一环境变量下加载可用 checkpoint。
 4. 当前这条 Triton 路径依赖 NVMe 上的额外 Python 路径 `/mnt/nvme/sober/pylibs/triton351`；如果以后重建镜像，建议把 Triton 和 CUDA 扩展重编流程直接固化到 Dockerfile。
 
-
 ## 2026-05-09 增量更新：Pi0.5 真实 checkpoint Triton 100 次统计
 
 本次在已经打通的 Pi0.5 Triton inference 路径上，进一步加载真实 checkpoint，统计 100 次稳定态推理耗时。
@@ -470,7 +470,6 @@ docker run --rm --runtime nvidia \
 2. 输出 shape 是 `(1, 50, 32)`，因为这份 `fold_towel` 配置里的 `action_chunk=50`。
 3. 因此前面随机初始化的 `(1, 10, 32)` benchmark 不能和这次结果直接按数值比较，两者推理长度不同。
 4. 当前结果已经证明：在 Orin Docker 环境里，Pi0.5 可以加载真实 checkpoint，并通过 Triton inference 路径完成 100 次稳定推理。
-
 
 ## 2026-05-11 增量更新：Triton 直接固化进镜像
 

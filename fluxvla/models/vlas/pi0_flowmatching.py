@@ -18,7 +18,14 @@ from typing import Callable, Dict, List, Optional, Union
 
 import torch
 import torch.nn.functional as F
-from torch.distributed.fsdp.wrap import _or_policy
+
+try:
+    from torch.distributed.fsdp.wrap import _or_policy
+except ModuleNotFoundError as exc:
+    _or_policy = None
+    _FSDP_WRAP_IMPORT_ERROR = exc
+else:
+    _FSDP_WRAP_IMPORT_ERROR = None
 from transformers.cache_utils import Cache
 
 from fluxvla.engines import (VLAS, build_llm_backbone_from_cfg,
@@ -846,7 +853,9 @@ class PI0FlowMatching(BaseVLA):
         nn.Embedding to prevent errors during sharding.
         """
         if _FSDP_WRAP_IMPORT_ERROR is not None:
-            raise RuntimeError('FSDP wrapping policies are unavailable in this torch build') from _FSDP_WRAP_IMPORT_ERROR
+            raise RuntimeError(
+                'FSDP wrapping policies are unavailable in this torch build'
+            ) from _FSDP_WRAP_IMPORT_ERROR
         wrapping_policies = []
         if self.vlm_backbone is not None:
             vlm_wrapping_policy = self.vlm_backbone.get_fsdp_wrapping_policy()

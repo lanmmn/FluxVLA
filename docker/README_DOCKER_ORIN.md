@@ -72,40 +72,44 @@ EOF
 ```
 
 ## 0.3 安装系统依赖
+
 ```bash
 sudo apt update
 sudo apt install -y cmake libglew-dev libosmesa6-dev ninja-build
 ```
 
-
 ## 当前镜像标签
 
 下面是仓库中推荐的 Orin 分层镜像和它们的配置/用途摘要：
 
-| 镜像标签 | 基础镜像 | 是否包含 ROS | FlashAttention | 主要用途 | 备注 |
-|---|---:|:---:|:---:|---|---|
-| `fluxvla:orin-base` | `nvcr.io/nvidia/l4t-jetpack:r36.4.0` | 否 | 无（仅系统/Runtime） | 基础层：系统依赖、PyTorch/Triton、FluxVLA 通用依赖 | 用于对外发布的最小运行时基线 |
-| `fluxvla:orin-fa` | 基于 `orin-base` | 否 | `flash-attn==2.5.5`（SM87 编译） | 包含为 Orin 预编译的 FlashAttention，供极速推理使用 | 优先从预编译 wheel 安装，避免现场源码编译 |
-| `fluxvla:orin-ros` | 基于 `orin-base` | 是（ROS Noetic） | 无（或可选安装） | 包含 ROS Noetic 运行时及 Python ROS 绑定，用于机器人集成与部署 | 不包含 flash‑attn 编译，体积以 ROS 为主 |
-| `fluxvla:orin-ros-fa` | 基于 `orin-fa` + `orin-ros` 组合 | 是（ROS Noetic） | `flash-attn==2.5.5`（SM87 编译） | 集成 ROS 与 FlashAttention 的完整运行镜像 | 适合在真机上同时运行 ROS 节点与高性能推理 |
+| 镜像标签              |                             基础镜像 |   是否包含 ROS   |          FlashAttention          | 主要用途                                                       | 备注                                      |
+| --------------------- | -----------------------------------: | :--------------: | :------------------------------: | -------------------------------------------------------------- | ----------------------------------------- |
+| `fluxvla:orin-base`   | `nvcr.io/nvidia/l4t-jetpack:r36.4.0` |        否        |       无（仅系统/Runtime）       | 基础层：系统依赖、PyTorch/Triton、FluxVLA 通用依赖             | 用于对外发布的最小运行时基线              |
+| `fluxvla:orin-fa`     |                     基于 `orin-base` |        否        | `flash-attn==2.5.5`（SM87 编译） | 包含为 Orin 预编译的 FlashAttention，供极速推理使用            | 优先从预编译 wheel 安装，避免现场源码编译 |
+| `fluxvla:orin-ros`    |                     基于 `orin-base` | 是（ROS Noetic） |         无（或可选安装）         | 包含 ROS Noetic 运行时及 Python ROS 绑定，用于机器人集成与部署 | 不包含 flash‑attn 编译，体积以 ROS 为主   |
+| `fluxvla:orin-ros-fa` |     基于 `orin-fa` + `orin-ros` 组合 | 是（ROS Noetic） | `flash-attn==2.5.5`（SM87 编译） | 集成 ROS 与 FlashAttention 的完整运行镜像                      | 适合在真机上同时运行 ROS 节点与高性能推理 |
 
 ### 镜像配置说明
 
 - `fluxvla:orin-base`:
+
   - 包含系统包（CMake、ninja、libosmesa、glew 等）、Python 3.10 运行时、经过验证的 PyTorch / Triton 安装以及 FluxVLA 的 Python 依赖。
   - 目的：作为其它衍生镜像的稳定基线，减少重复构建成本。
 
 - `fluxvla:orin-fa`:
+
   - 在 `orin-base` 基础上安装或复制预编译的 `flash_attn` wheel（针对 SM87 编译的二进制）。
   - 环境变量：推荐在运行时保留 `ATTN_IMPLEMENTATION=flash_attention_2` 和 `TRANSFORMERS_ATTN_IMPLEMENTATION=flash_attention_2`。
   - 优点：避免每次构建都从源码长时间编译 flash‑attn；运行时能显著提升 attention-heavy 模型的性能（前提是使用 flash‑attn 支持的 attention 实现）。
 
 - `fluxvla:orin-ros`:
+
   - 单独构建 ROS Noetic（/opt/ros/noetic）和 Python ROS 绑定（`rospy`、`cv_bridge` 等），并复制到镜像的 Python site-packages 中。
   - 目的：在需要 ROS 通信、消息与传感器接口的真机部署场景使用。
   - 注意：ROS 层会显著增加镜像体积，但对 GPU 内核性能没有直接影响。
 
 - `fluxvla:orin-ros-fa`:
+
   - 复用 `orin-fa` 的 flash‑attn 二进制与 `orin-ros` 的 ROS 运行时，形成面向真机部署且具备高性能 attention kernel 的镜像。
 
 ### 选择指南
@@ -345,20 +349,20 @@ FLUXVLA_IMAGE=fluxvla:orin-ros docker/run_docker.sh \
 
 `run_docker.sh` 自动处理的参数：
 
-| 参数 | 值 | 用途 |
-|---|---|---|
-| `--runtime=nvidia` | - | GPU 支持 |
-| `--ipc=host` | - | 避免共享内存不足 |
-| `--network=host` | - | 支持 ROS / 机器人网络通信 |
-| `--shm-size` | `16g` | 增大共享内存 |
-| `PYTHONPATH` | `/workspace/FluxVLA` | 源码导入路径 |
-| `ATTN_IMPLEMENTATION` | `flash_attention_2` | 默认使用 FlashAttention |
-| `TRANSFORMERS_ATTN_IMPLEMENTATION` | `flash_attention_2` | Transformers attention 后端 |
-| `-v FluxVLA:/workspace/FluxVLA` | - | 挂载源码（宿主机实时同步） |
-| `-v /mnt/nvme:/mnt/nvme` | - | 挂载 NVMe（checkpoint、日志等） |
-| `WANDB_MODE` | `disabled` | 禁用 wandb |
-| `ROS_MASTER_URI` | 宿主机环境变量 | 如果设置则自动透传 |
-| `ROS_IP` / `ROS_HOSTNAME` | 宿主机环境变量 | 如果设置则自动透传 |
+| 参数                               | 值                   | 用途                            |
+| ---------------------------------- | -------------------- | ------------------------------- |
+| `--runtime=nvidia`                 | -                    | GPU 支持                        |
+| `--ipc=host`                       | -                    | 避免共享内存不足                |
+| `--network=host`                   | -                    | 支持 ROS / 机器人网络通信       |
+| `--shm-size`                       | `16g`                | 增大共享内存                    |
+| `PYTHONPATH`                       | `/workspace/FluxVLA` | 源码导入路径                    |
+| `ATTN_IMPLEMENTATION`              | `flash_attention_2`  | 默认使用 FlashAttention         |
+| `TRANSFORMERS_ATTN_IMPLEMENTATION` | `flash_attention_2`  | Transformers attention 后端     |
+| `-v FluxVLA:/workspace/FluxVLA`    | -                    | 挂载源码（宿主机实时同步）      |
+| `-v /mnt/nvme:/mnt/nvme`           | -                    | 挂载 NVMe（checkpoint、日志等） |
+| `WANDB_MODE`                       | `disabled`           | 禁用 wandb                      |
+| `ROS_MASTER_URI`                   | 宿主机环境变量       | 如果设置则自动透传              |
+| `ROS_IP` / `ROS_HOSTNAME`          | 宿主机环境变量       | 如果设置则自动透传              |
 
 如果需要临时回退 eager attention：
 
@@ -474,14 +478,15 @@ load_state_dict: missing=0, unexpected=0
 
 ### GR00T Baseline vs Accelerated 对比（Orin MODE_30W）
 
-| 方案 | 注意力 | 模型组件 | 中位延迟 | 频率 | 日志 |
-|------|--------|---------|---------|------|------|
-| **Baseline** | eager | `EagleBackbone` + `FlowMatchingHead` | 190.6 ms | ~5.24 Hz | terminal |
-| **Accelerated (eager)** | eager + math SDPA | `EagleInferenceBackbone` + `FlowMatchingInferenceHead` | 305.6 ms | ~3.27 Hz | `gr00t_ur3_accel_100run.log` |
-| **Accelerated (eager, 分段)** | eager + math SDPA | 同上，分段计时 | VLM: 152ms + Head: 150ms = 302.4 ms | ~3.31 Hz | `gr00t_accel_split_100.log` |
-| **Accelerated (flash)** | flash_attention_2 + flash SDPA | `EagleInferenceBackbone` + `FlowMatchingInferenceHead` | **151.1 ms** | **~6.62 Hz** | `gr00t_accel_flash_100run.log` |
+| 方案                          | 注意力                         | 模型组件                                               | 中位延迟                            | 频率         | 日志                           |
+| ----------------------------- | ------------------------------ | ------------------------------------------------------ | ----------------------------------- | ------------ | ------------------------------ |
+| **Baseline**                  | eager                          | `EagleBackbone` + `FlowMatchingHead`                   | 190.6 ms                            | ~5.24 Hz     | terminal                       |
+| **Accelerated (eager)**       | eager + math SDPA              | `EagleInferenceBackbone` + `FlowMatchingInferenceHead` | 305.6 ms                            | ~3.27 Hz     | `gr00t_ur3_accel_100run.log`   |
+| **Accelerated (eager, 分段)** | eager + math SDPA              | 同上，分段计时                                         | VLM: 152ms + Head: 150ms = 302.4 ms | ~3.31 Hz     | `gr00t_accel_split_100.log`    |
+| **Accelerated (flash)**       | flash_attention_2 + flash SDPA | `EagleInferenceBackbone` + `FlowMatchingInferenceHead` | **151.1 ms**                        | **~6.62 Hz** | `gr00t_accel_flash_100run.log` |
 
 > **结论**：
+>
 > 1. **eager 路径下**，FluxVLA 的 Triton kernel + CUDA Graph 加速版（305.6 ms）反而比 baseline（190.6 ms）慢约 1.6x —— 因为脚本强制 `enable_flash_sdp(False)` / `enable_mem_efficient_sdp(False)`，注意力退回 math 后端，且 Eagle backbone 走 eager。
 > 2. **接入 flash-attn 2.5.5 (SM87) 后**，加速版降到 **151.1 ms（6.62 Hz）**，相比 eager 加速版提速 **2.02x**，也优于 baseline。提速来自两处：Eagle backbone 走 `flash_attention_2`，DiT head 的 SDPA 从 math 后端切到 flash/mem-efficient 后端。
 
@@ -489,14 +494,15 @@ load_state_dict: missing=0, unexpected=0
 
 四种组合，均 warmup=5 / runs=100；baseline 用 lang-len=48，accelerated 用 lang-len=600（各自脚本默认）。
 
-| 方案 | 注意力 | 中位延迟 | 频率 | 日志 |
-|------|--------|---------|------|------|
-| Baseline | eager | 198.05 ms | ~5.05 Hz | terminal |
-| Baseline | flash | 191.97 ms | ~5.21 Hz | terminal |
-| Accelerated | eager + math SDPA | 158.15 ms | ~6.32 Hz | terminal |
+| 方案            | 注意力                             | 中位延迟      | 频率         | 日志                   |
+| --------------- | ---------------------------------- | ------------- | ------------ | ---------------------- |
+| Baseline        | eager                              | 198.05 ms     | ~5.05 Hz     | terminal               |
+| Baseline        | flash                              | 191.97 ms     | ~5.21 Hz     | terminal               |
+| Accelerated     | eager + math SDPA                  | 158.15 ms     | ~6.32 Hz     | terminal               |
 | **Accelerated** | **flash_attention_2 + flash SDPA** | **150.66 ms** | **~6.64 Hz** | `maxn_accel_flash.log` |
 
 > **MAXN 下的关键发现**：
+>
 > 1. **加速版对 GPU 频率极敏感**：accelerated-eager 从 30W 的 305.6 ms 暴降到 MAXN 的 158.15 ms（~1.9x）。因为 eager 走 math-SDPA，是 compute-bound 的 O(n²) 运算，随时钟线性提速。
 > 2. **flash 版几乎不受功耗影响**：accelerated-flash 在 30W（151.1 ms）与 MAXN（150.66 ms）基本一致，说明它已不再被注意力计算卡住，瓶颈转移到访存 / kernel 启动 / CUDA Graph replay。
 > 3. **baseline 基本不随 MAXN 变化**（190→198 ms）：lang-len 仅 48，注意力占比小，非 compute-bound；flash 仅带来约 3% 提升。
