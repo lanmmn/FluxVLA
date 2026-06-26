@@ -76,7 +76,7 @@ sudo apt update
 sudo apt install -y rsync
 sudo systemctl stop docker
 sudo mkdir -p /mnt/nvme/docker
-# sudo apt install rsync 
+# sudo apt install rsync
 sudo rsync -aHAX /var/lib/docker/ /mnt/nvme/docker/
 
 sudo mkdir -p /etc/docker

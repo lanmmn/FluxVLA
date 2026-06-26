@@ -20,7 +20,6 @@ import imageio
 import numpy as np
 import tensorflow as tf
 import torch
-from mmengine.utils import digit_version
 from PIL import Image, ImageDraw
 
 OPENVLA_V01_SYSTEM_PROMPT = (

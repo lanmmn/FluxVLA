@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 target = Path(
-    "/opt/ros_noetic_ws/src/rosconsole/src/rosconsole/impl/rosconsole_log4cxx.cpp"
+    '/opt/ros_noetic_ws/src/rosconsole/src/rosconsole/impl/rosconsole_log4cxx.cpp'
 )
 s = target.read_text()
 original = s
@@ -65,7 +65,7 @@ s = re.sub(
 #    (std::vector<LoggerPtr>), so keep LoggerList usages intact.
 
 if s == original:
-    print("WARNING: no changes were made!")
+    print('WARNING: no changes were made!')
     for i, line in enumerate(original.splitlines()[:100], 1):
         print(f"  {i}: {line}")
 else:

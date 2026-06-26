@@ -117,8 +117,9 @@ class FSDPTrainRunner(BaseTrainRunner):
             save_epoch_interval=save_epoch_interval,
             save_iter_interval=save_iter_interval,
             max_keep_ckpts=max_keep_ckpts,
-            lr_scheduler=lr_scheduler,
-            betas=betas,
+            lr_scheduler_type=lr_scheduler_type,
+            lr_schedule=lr_schedule,
+            warmup_ratio=warmup_ratio,
             enable_gradient_checkpointing=enable_gradient_checkpointing,
             enable_mixed_precision_training=enable_mixed_precision_training,
             reduce_in_full_precision=reduce_in_full_precision,
@@ -246,9 +247,8 @@ class FSDPTrainRunner(BaseTrainRunner):
 
                 # Save scheduler state
                 if self.lr_scheduler is not None:
-                    checkpoint_dict[
-                        'scheduler_state_dict'] = self.lr_scheduler.state_dict(
-                        )
+                    checkpoint_dict['scheduler_state_dict'] = (
+                        self.lr_scheduler.state_dict())
 
                 # Save full optimizer state dict (only on rank 0)
                 if full_optimizer_state_dict is not None:
