@@ -1,31 +1,42 @@
 #!/usr/bin/env python3
-"""GR00t Eagle 3B 推理测试 - 参考 PI0.5 测试脚本结构"""
+"""GR00t Eagle 3B 推理测试 - 添加 embodiment_ids 支持
+
+修复了缺失的 embodiment_ids 参数问题。
+"""
 
 from __future__ import annotations
 
 import argparse
+import os
 import statistics
 import sys
 import time
 from pathlib import Path
 
+# 禁用 Flash Attention
+os.environ['ATTN_IMPLEMENTATION'] = 'eager'
+os.environ['TRANSFORMERS_ATTN_IMPLEMENTATION'] = 'eager'
+
 import torch
 from mmengine import Config
+
+torch.backends.cuda.enable_flash_sdp(False)
+torch.backends.cuda.enable_mem_efficient_sdp(False)
 
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description='GR00t Eagle 3B inference test')
-    p.add_argument('--config', type=str, required=True, help='Config file path')
-    p.add_argument('--ckpt', type=str, default=None, help='Checkpoint path')
-    p.add_argument('--no-weights', action='store_true', help='Do not load weights')
+    p.add_argument('--config', type=str, required=True)
+    p.add_argument('--ckpt', type=str, default=None)
+    p.add_argument('--no-weights', action='store_true')
     p.add_argument('--batch-size', type=int, default=1)
-    p.add_argument('--num-views', type=int, default=2, help='Number of cameras for UR3')
+    p.add_argument('--num-views', type=int, default=2)
     p.add_argument('--lang-len', type=int, default=48)
     p.add_argument('--image-size', type=int, default=224)
     p.add_argument('--seed', type=int, default=0)
     p.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
-    p.add_argument('--predict-runs', type=int, default=10, help='Number of inference runs')
-    p.add_argument('--warmup', type=int, default=2, help='Number of warmup runs')
+    p.add_argument('--predict-runs', type=int, default=100)
+    p.add_argument('--warmup', type=int, default=5)
     return p.parse_args()
 
 
@@ -36,12 +47,14 @@ def _make_dummy_batch(
     num_views: int,
     image_size: int,
     lang_len: int,
-    max_action_dim: int,
-    n_action_steps: int,
+    state_dim: int,
+    action_dim: int,
     vocab_size: int,
+    num_embodiments: int = 1,
 ) -> dict[str, torch.Tensor]:
-    """构造与 PI0.5 相同格式的 dummy 输入张量"""
-    # 图像: (B, V*3, H, W) - 与 PI0.5 相同的格式
+    """构造与 GR00t predict_action 兼容的 dummy 张量"""
+
+    # 图像: (B, V*3, H, W)
     images = torch.randn(
         batch_size,
         num_views * 3,
@@ -50,8 +63,14 @@ def _make_dummy_batch(
         device=device,
         dtype=torch.float32,
     )
+
     # 图像 mask: (B, num_views)
-    img_masks = torch.ones(batch_size, num_views, dtype=torch.bool, device=device)
+    img_masks = torch.ones(
+        batch_size,
+        num_views,
+        dtype=torch.bool,
+        device=device,
+    )
 
     # 语言 tokens
     lang_tokens = torch.randint(
@@ -63,15 +82,20 @@ def _make_dummy_batch(
     )
     lang_masks = torch.ones(batch_size, lang_len, dtype=torch.bool, device=device)
 
-    # 状态和噪声
-    states = torch.randn(batch_size, max_action_dim, device=device, dtype=torch.float32)
+    # 状态: (B, state_dim)
+    states = torch.randn(batch_size, state_dim, device=device, dtype=torch.float32)
+
+    # 噪声: (B, action_dim, action_dim)
     noise = torch.randn(
         batch_size,
-        n_action_steps,
-        max_action_dim,
+        action_dim,
+        action_dim,
         device=device,
         dtype=torch.float32,
     )
+
+    # embodiment_ids: (B,) - 机器人类型 ID
+    embodiment_ids = torch.zeros(batch_size, device=device, dtype=torch.long)
 
     return {
         'images': images,
@@ -80,13 +104,15 @@ def _make_dummy_batch(
         'lang_masks': lang_masks,
         'states': states,
         'noise': noise,
+        'embodiment_ids': embodiment_ids,  # 添加这个参数
     }
 
 
 def main() -> int:
     args = _parse_args()
 
-    # 导入 FluxVLA
+    print('Flash Attention disabled (using eager attention)')
+
     from fluxvla.engines import build_vla_from_cfg, set_seed_everywhere
 
     set_seed_everywhere(args.seed)
@@ -123,6 +149,9 @@ def main() -> int:
             return 1
         print(f'Loading weights: {ckpt_path}')
         state = torch.load(str(ckpt_path), map_location='cpu')
+        if isinstance(state, dict) and 'model' in state:
+            print('Detected training checkpoint; loading checkpoint[\'model\']')
+            state = state['model']
         missing, unexpected = vla.load_state_dict(state, strict=False)
         print(f'load_state_dict: missing={len(missing)}, unexpected={len(unexpected)}')
 
@@ -133,12 +162,14 @@ def main() -> int:
     else:
         print('Device: CPU')
 
-    # 从配置获取参数
-    max_action_dim = model_cfg['vla_head']['action_dim']  # 32
-    n_action_steps = model_cfg['vla_head']['action_dim']  # 32
-    vocab_size = 257152  # Eagle 默认词汇表大小
+    # 从配置获取正确的维度
+    state_dim = model_cfg['vla_head']['state_dim']
+    action_dim = model_cfg['vla_head']['action_dim']
+    ori_action_dim = model_cfg['vla_head']['ori_action_dim']
+    num_embodiments = model_cfg.get('num_embodiments', 1)
+    vocab_size = 257152
 
-    print(f'Model params: action_dim={max_action_dim}, n_action_steps={n_action_steps}')
+    print(f'Model params: state_dim={state_dim}, action_dim={action_dim}, ori_action_dim={ori_action_dim}, num_embodiments={num_embodiments}')
 
     # 构造 dummy batch
     batch = _make_dummy_batch(
@@ -147,9 +178,10 @@ def main() -> int:
         num_views=args.num_views,
         image_size=args.image_size,
         lang_len=args.lang_len,
-        max_action_dim=max_action_dim,
-        n_action_steps=n_action_steps,
+        state_dim=state_dim,
+        action_dim=action_dim,
         vocab_size=vocab_size,
+        num_embodiments=num_embodiments,
     )
 
     print(f'Benchmark predict_action: warmup={args.warmup}, runs={args.predict_runs} (dummy tensors)...')
@@ -165,16 +197,24 @@ def main() -> int:
         ):
             # 预热
             for _ in range(args.warmup):
-                actions = vla.predict_action(**batch)
-                if device.type == 'cuda':
-                    torch.cuda.synchronize()
+                try:
+                    actions = vla.predict_action(**batch)
+                    if device.type == 'cuda':
+                        torch.cuda.synchronize()
+                except Exception as e:
+                    print(f'ERROR during warmup: {e}', file=sys.stderr)
+                    return 1
 
             # 正式测试
-            for _ in range(args.predict_runs):
+            for i in range(args.predict_runs):
                 if device.type == 'cuda':
                     torch.cuda.synchronize()
                 t0 = time.perf_counter()
-                actions = vla.predict_action(**batch)
+                try:
+                    actions = vla.predict_action(**batch)
+                except Exception as e:
+                    print(f'ERROR at run {i}: {e}', file=sys.stderr)
+                    return 1
                 if device.type == 'cuda':
                     torch.cuda.synchronize()
                 times.append(time.perf_counter() - t0)

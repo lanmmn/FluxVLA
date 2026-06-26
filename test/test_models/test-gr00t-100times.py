@@ -21,9 +21,14 @@ torch.backends.cuda.enable_mem_efficient_sdp(True)
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description='GR00T accelerated inference benchmark')
+    p = argparse.ArgumentParser(description='GR00T baseline / accelerated inference benchmark')
     p.add_argument('--config', required=True)
     p.add_argument('--ckpt', required=True)
+    p.add_argument(
+        '--variant',
+        choices=('baseline', 'accelerated'),
+        default='accelerated',
+        help='baseline uses cfg.model; accelerated uses cfg.inference_model.')
     p.add_argument('--warmup', type=int, default=5)
     p.add_argument('--predict-runs', type=int, default=100)
     p.add_argument('--batch-size', type=int, default=1)
@@ -84,12 +89,13 @@ def main() -> int:
         return 1
 
     cfg = Config.fromfile(str(Path(args.config).expanduser().resolve()))
-    if 'inference_model' not in cfg:
-        print('ERROR: config missing inference_model', file=sys.stderr)
+    cfg_key = 'model' if args.variant == 'baseline' else 'inference_model'
+    if cfg_key not in cfg:
+        print(f'ERROR: config missing {cfg_key}', file=sys.stderr)
         return 1
-    model_cfg = cfg.inference_model.to_dict()
+    model_cfg = cfg[cfg_key].to_dict()
 
-    print('Building GR00T accelerated inference_model...')
+    print(f'Building GR00T {args.variant} {cfg_key}...')
     vla = build_vla_from_cfg(model_cfg)
     vla = vla.to(device)
     if hasattr(vla, 'to_bfloat16'):
@@ -121,7 +127,7 @@ def main() -> int:
     image_token_count = int((batch['lang_tokens'] == image_token_id).sum().item()) if image_token_id is not None else 0
     print(f'image_token_id={image_token_id}, image_token_count={image_token_count}')
 
-    print(f'Benchmark accelerated predict_action: warmup={args.warmup}, runs={args.predict_runs}, lang_len={args.lang_len}')
+    print(f'Benchmark {args.variant} predict_action: warmup={args.warmup}, runs={args.predict_runs}, lang_len={args.lang_len}')
     times = []
     actions = None
     with torch.inference_mode():
