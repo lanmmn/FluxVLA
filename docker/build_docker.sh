@@ -18,15 +18,12 @@ Targets:
   fa          Build fluxvla:orin-fa from fluxvla:orin-base and the staged wheel.
   ros         Build fluxvla:orin-ros from fluxvla:orin-base.
   ros-fa      Build fluxvla:orin-ros-fa from fluxvla:orin-fa and fluxvla:orin-ros.
-  legacy      Compatibility target for the original monolithic fluxvla:orin image.
-  legacy-ros  Compatibility target for the original monolithic fluxvla:orin-ros image.
 
 Examples:
   docker/build_docker.sh
   docker/build_docker.sh all 1.0.0
   docker/build_docker.sh fa
   docker/build_docker.sh ros 1.0.0
-  docker/build_docker.sh legacy
   FLUXVLA_USE_CN_MIRRORS=1 docker/build_docker.sh all
 
 Environment:
@@ -37,7 +34,6 @@ Environment:
   FLUXVLA_FLASH_ATTN_MAX_JOBS=N
   FLUXVLA_WHEEL_DIR=/mnt/nvme/fluxvla-wheels
   FLUXVLA_BASE_IMAGE=fluxvla:orin-base
-  FLUXVLA_ROS_IMAGE=fluxvla:orin-ros
   FLUXVLA_FLASH_ATTN_WHEEL=flash_attn-*.whl
   FLUXVLA_BUILD_DRY_RUN=1
 
@@ -68,7 +64,7 @@ if is_version_arg "${TARGET}"; then
 fi
 
 case "${TARGET}" in
-    all|base|wheel|fa|ros|ros-fa|legacy|legacy-ros|orin|orin-ros)
+    all|base|wheel|fa|ros|ros-fa)
         ;;
     *)
         echo "Error: unknown target '${TARGET}'" >&2
@@ -233,7 +229,8 @@ with_default_ros_mirror() {
 build_base() {
     prepare_build_env
     print_header "Building FluxVLA Orin Base" "orin-base"
-    build_image "${SCRIPT_DIR}/Dockerfile.orin.base" "orin-base"
+    build_image "${SCRIPT_DIR}/Dockerfile.orin" "orin-base" \
+        --target "base"
 }
 
 build_wheel() {
@@ -297,7 +294,6 @@ python3 -m pip wheel --no-build-isolation --wheel-dir /wheelhouse .
 build_fa() {
     prepare_build_env
     FLASH_ATTN_MAX_JOBS="${FLUXVLA_FLASH_ATTN_MAX_JOBS:-1}"
-    BASE_IMAGE="${FLUXVLA_BASE_IMAGE:-fluxvla:orin-base}"
     FLASH_ATTN_WHEEL="${FLUXVLA_FLASH_ATTN_WHEEL:-}"
 
     stage_wheelhouse
@@ -311,8 +307,8 @@ build_fa() {
     fi
 
     print_header "Building FluxVLA Orin FlashAttention" "orin-fa"
-    build_image "${SCRIPT_DIR}/Dockerfile.orin.fa" "orin-fa" \
-        --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+    build_image "${SCRIPT_DIR}/Dockerfile.orin" "orin-fa" \
+        --target "fa" \
         --build-arg "FLASH_ATTN_MAX_JOBS=${FLASH_ATTN_MAX_JOBS}" \
         --build-arg "FLASH_ATTN_WHEEL=${FLASH_ATTN_WHEEL}"
 }
@@ -320,46 +316,18 @@ build_fa() {
 build_ros() {
     with_default_ros_mirror
     prepare_build_env
-    BASE_IMAGE="${FLUXVLA_BASE_IMAGE:-fluxvla:orin-base}"
 
     print_header "Building FluxVLA Orin ROS" "orin-ros"
-    build_image "${SCRIPT_DIR}/Dockerfile.orin.ros" "orin-ros" \
-        --build-arg "BASE_IMAGE=${BASE_IMAGE}"
+    build_image "${SCRIPT_DIR}/Dockerfile.orin" "orin-ros" \
+        --target "ros"
 }
 
 build_ros_fa() {
     prepare_build_env
-    BASE_IMAGE="${FLUXVLA_BASE_IMAGE:-fluxvla:orin-fa}"
-    ROS_IMAGE="${FLUXVLA_ROS_IMAGE:-fluxvla:orin-ros}"
 
     print_header "Building FluxVLA Orin ROS + FlashAttention" "orin-ros-fa"
-    build_image "${SCRIPT_DIR}/Dockerfile.orin.ros-fa" "orin-ros-fa" \
-        --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
-        --build-arg "ROS_IMAGE=${ROS_IMAGE}"
-}
-
-build_legacy() {
-    local install_ros="${1}"
-    prepare_build_env
-    FLASH_ATTN_MAX_JOBS="${FLUXVLA_FLASH_ATTN_MAX_JOBS:-1}"
-
-    case "${install_ros}" in
-        0)
-            VARIANT="orin"
-            ;;
-        1)
-            VARIANT="orin-ros"
-            ;;
-        *)
-            echo "Error: legacy install_ros must be 0 or 1" >&2
-            exit 1
-            ;;
-    esac
-
-    print_header "Building FluxVLA Orin Legacy" "${VARIANT}"
-    build_image "${SCRIPT_DIR}/Dockerfile.orin" "${VARIANT}" \
-        --build-arg "INSTALL_ROS=${install_ros}" \
-        --build-arg "FLASH_ATTN_MAX_JOBS=${FLASH_ATTN_MAX_JOBS}"
+    build_image "${SCRIPT_DIR}/Dockerfile.orin" "orin-ros-fa" \
+        --target "ros-fa"
 }
 
 cd "${REPO_ROOT}"
@@ -386,12 +354,6 @@ case "${TARGET}" in
         ;;
     ros-fa)
         build_ros_fa
-        ;;
-    legacy|orin)
-        build_legacy 0
-        ;;
-    legacy-ros|orin-ros)
-        build_legacy 1
         ;;
 esac
 

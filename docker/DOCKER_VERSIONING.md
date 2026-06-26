@@ -41,52 +41,25 @@ docker/build_docker.sh ros
 docker/build_docker.sh ros-fa
 ```
 
-### 旧单镜像兼容构建（不带版本号）
-
-```bash
-docker/build_docker.sh legacy
-```
-
-产出标签：
-
-```
-fluxvla:orin                    # 浮动，最新
-```
-
-需要 ROS 时：
-
-```bash
-docker/build_docker.sh legacy-ros
-```
-
-产出标签：
-
-```
-fluxvla:orin-ros
-```
-
-`legacy` 表示旧版兼容模式，用于继续构建原来的单镜像 `fluxvla:orin`；`legacy-ros` 用于继续构建原来的单镜像 ROS 版 `fluxvla:orin-ros`。它们不是当前推荐主线，主要用于旧部署回滚、和历史镜像对比、或排查分层构建差异。
-
-两个构建都会默认从源码编译 `flash-attn==2.5.5`，并只生成 Jetson Orin 需要的 SM87 kernel。Orin 内存紧张时可以限制编译并发：
-
-```bash
-FLUXVLA_FLASH_ATTN_MAX_JOBS=1 docker/build_docker.sh legacy
-FLUXVLA_FLASH_ATTN_MAX_JOBS=1 docker/build_docker.sh legacy-ros
-```
-
 ### 发布构建（带版本号）
 
 确认稳定、达到里程碑后，传入语义版本号：
 
 ```bash
-docker/build_docker.sh legacy 1.0.0
+docker/build_docker.sh all 1.0.0
 ```
 
 产出标签：
 
 ```
-fluxvla:orin                    # 浮动，最新
-fluxvla:orin-1.0.0              # 不可变发布版
+fluxvla:orin-base               # 浮动，最新
+fluxvla:orin-base-1.0.0         # 不可变发布版
+fluxvla:orin-fa
+fluxvla:orin-fa-1.0.0
+fluxvla:orin-ros
+fluxvla:orin-ros-1.0.0
+fluxvla:orin-ros-fa
+fluxvla:orin-ros-fa-1.0.0
 ```
 
 ### 版本号怎么递增（SemVer）
@@ -204,11 +177,10 @@ docker/build_docker.sh all 1.1.0                # → orin-ros-fa-1.1.0 等版�
 
 | 操作 | 命令 |
 |------|------|
-| 旧单镜像兼容构建 | `docker/build_docker.sh legacy` |
 | 推荐分层构建 | `docker/build_docker.sh` |
-| 发版构建 | `docker/build_docker.sh legacy 1.0.0` / `docker/build_docker.sh all 1.0.0` |
+| 发版构建 | `docker/build_docker.sh all 1.0.0` |
 | 运行最新 | `./run_docker.sh` |
-| 运行指定版本 | `FLUXVLA_IMAGE=fluxvla:orin-1.0.0 ./run_docker.sh` |
-| 查看版本元数据 | `docker inspect fluxvla:orin --format '{{json .Config.Labels}}'` |
-| 回滚 | `docker tag fluxvla:orin-1.0.0 fluxvla:orin` |
+| 运行指定版本 | `FLUXVLA_IMAGE=fluxvla:orin-ros-fa-1.0.0 ./run_docker.sh` |
+| 查看版本元数据 | `docker inspect fluxvla:orin-ros-fa --format '{{json .Config.Labels}}'` |
+| 回滚 | `docker tag fluxvla:orin-ros-fa-1.0.0 fluxvla:orin-ros-fa` |
 | 清理悬空镜像 | `docker image prune -f` |
