@@ -167,7 +167,7 @@ class Registry:
             >>>     pass
             >>> # The scope of ``ResNet`` will be ``mmdet``.
         """
-        
+
         # `sys._getframe` returns the frame object that many calls below the
         # top of the stack. The call stack for `infer_scope` can be listed as
         # follow:
@@ -285,7 +285,7 @@ class Registry:
             >>> DefaultScope.get_current_instance().scope_name
             custom
         """  # noqa: E501
-        
+
         # Switch to the given scope temporarily. If the corresponding registry
         # can be found in root registry, return the registry under the scope,
         # otherwise return the registry itself.
@@ -347,7 +347,7 @@ class Registry:
         """Import modules from the pre-defined locations in self._location."""
         if not self._imported:
             # Avoid circular import
-            
+
             # avoid BC breaking
             if len(self._locations) == 0 and self.scope in MODULE2PACKAGE:
                 _safe_print_log(
@@ -446,7 +446,7 @@ class Registry:
             >>> mobilenet_cls = DETECTORS.get('cls.MobileNet')
         """
         # Avoid circular import
-        
+
         if not isinstance(key, str):
             raise TypeError(
                 'The key argument of `Registry.get` must be a str, '

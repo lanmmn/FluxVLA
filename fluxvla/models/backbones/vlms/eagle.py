@@ -12,12 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
 from functools import partial
 from typing import Callable, Dict, List, Optional, Type
 
-import os
 import torch
 from torch import nn
+
 try:
     from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 except ModuleNotFoundError as exc:
@@ -34,6 +35,7 @@ from transformers.models.qwen3.modeling_qwen3 import (Qwen3Attention,
 from fluxvla.engines import VLM_BACKBONES, str_to_dtype
 from fluxvla.models.third_party_models.eagle2_hg_model.modeling_eagle2_5_vl import \
     Eagle2_5_VLForConditionalGeneration  # noqa: E501
+
 try:
     from fluxvla.models.third_party_models.eagle2_hg_model.modeling_eagle2_5_vl_inference import \
         Eagle2_5_VLInferenceForConditionalGeneration  # noqa: E501
@@ -82,7 +84,8 @@ class EagleBackbone(nn.Module):
             config.num_hidden_layers = select_layer
 
         # Respect runtime override for Jetson/Orin where flash-attn may be unavailable.
-        attn_impl = os.environ.get('ATTN_IMPLEMENTATION') or os.environ.get('TRANSFORMERS_ATTN_IMPLEMENTATION') or 'flash_attention_2'
+        attn_impl = os.environ.get('ATTN_IMPLEMENTATION') or os.environ.get(
+            'TRANSFORMERS_ATTN_IMPLEMENTATION') or 'flash_attention_2'
         config._attn_implementation = attn_impl
         if hasattr(config, 'vision_config'):
             config.vision_config._attn_implementation = attn_impl
@@ -244,7 +247,9 @@ class EagleBackbone(nn.Module):
             Callable: Wrapping policy function.
         """
         if _FSDP_WRAP_IMPORT_ERROR is not None:
-            raise RuntimeError('FSDP wrapping policies are unavailable in this torch build') from _FSDP_WRAP_IMPORT_ERROR
+            raise RuntimeError(
+                'FSDP wrapping policies are unavailable in this torch build'
+            ) from _FSDP_WRAP_IMPORT_ERROR
         transformer_block_policy = partial(
             transformer_auto_wrap_policy,
             transformer_layer_cls={Qwen3Attention, Qwen3MLP},
@@ -296,7 +301,8 @@ class EagleInferenceBackbone(nn.Module):
             config.num_hidden_layers = select_layer
 
         # Respect runtime override for Jetson/Orin where flash-attn may be unavailable.
-        attn_impl = os.environ.get('ATTN_IMPLEMENTATION') or os.environ.get('TRANSFORMERS_ATTN_IMPLEMENTATION') or 'flash_attention_2'
+        attn_impl = os.environ.get('ATTN_IMPLEMENTATION') or os.environ.get(
+            'TRANSFORMERS_ATTN_IMPLEMENTATION') or 'flash_attention_2'
         config._attn_implementation = attn_impl
         if hasattr(config, 'vision_config'):
             config.vision_config._attn_implementation = attn_impl
@@ -309,7 +315,9 @@ class EagleInferenceBackbone(nn.Module):
 
         # Initialize model and convert to target dtype
         if Eagle2_5_VLInferenceForConditionalGeneration is None:
-            raise RuntimeError('Eagle inference backbone requires optional triton dependency') from _EAGLE_INFERENCE_IMPORT_ERROR
+            raise RuntimeError(
+                'Eagle inference backbone requires optional triton dependency'
+            ) from _EAGLE_INFERENCE_IMPORT_ERROR
         self.vlm = Eagle2_5_VLInferenceForConditionalGeneration(config=config)
         if target_dtype is not None:
             self.vlm = self.vlm.to(target_dtype)

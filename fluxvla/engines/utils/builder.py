@@ -78,7 +78,7 @@ def build_from_cfg(
         object: The constructed object.
     """
     # Avoid circular import
-    
+
     if not isinstance(cfg, (dict, ConfigDict, Config)):
         raise TypeError(
             f'cfg should be a dict, ConfigDict or Config, but got {type(cfg)}')

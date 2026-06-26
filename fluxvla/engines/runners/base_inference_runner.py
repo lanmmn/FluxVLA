@@ -129,8 +129,7 @@ class BaseInferenceRunner:
             stage_t0 = time.perf_counter()
             self.vla = build_vla_from_cfg(cfg.inference_model)
             overwatch.info(
-                f'[Startup] build_vla: {time.perf_counter() - stage_t0:.1f}s'
-            )
+                f'[Startup] build_vla: {time.perf_counter() - stage_t0:.1f}s')
             assert Path.exists(Path(ckpt_path)), \
                 f'Checkpoint path {ckpt_path} does not exist!'
             stage_t0 = time.perf_counter()
@@ -373,13 +372,13 @@ class BaseInferenceRunner:
                 self._action_ctx = SimpleNamespace()
                 self._action_ctx.instruction = instruction
                 inputs = self._preprocess(instruction)
-                
+
                 with torch.autocast(
                         'cuda',
                         dtype=self.mixed_precision_dtype,
                         enabled=(self.enable_mixed_precision
                                  and not self._use_remote)):
-                    
+
                     raw_action = self._predict_action(inputs)
                 torch.cuda.synchronize()
                 actions = self._postprocess_actions(raw_action)

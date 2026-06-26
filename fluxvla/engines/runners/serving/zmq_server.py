@@ -223,7 +223,8 @@ def create_server(
     total_infer_time = 0.0
     start_time = time.time()
     profile_enabled = os.environ.get('FLUXVLA_SERVING_PROFILE', '0') == '1'
-    profile_interval = int(os.environ.get('FLUXVLA_SERVING_PROFILE_INTERVAL', '50'))
+    profile_interval = int(
+        os.environ.get('FLUXVLA_SERVING_PROFILE_INTERVAL', '50'))
 
     def predict_action(obs_data: bytes = None,
                        unnorm_key: str = '',

@@ -23,11 +23,12 @@ docker/build_docker.sh
 ```
 
 默认构建推荐的新分层镜像：
+
 - `fluxvla:orin-base`  w/o flash attention & ros1
 - `fluxvla:orin-fa`  with flash attention
 - `fluxvla:orin-ros`  with ros1-noetic
 - `fluxvla:orin-ros-fa`
-避免 FlashAttention 和 ROS 每次一起重编。
+  避免 FlashAttention 和 ROS 每次一起重编。
 
 真机推理优先使用：
 
@@ -142,7 +143,6 @@ docker/build_docker.sh ros-fa
 FluxVLA 源码跟随：
 无需重新重新编译镜像和容器， `docker/run_docker.sh` bind mount 当前源码到 `/workspace/FluxVLA`。修改 Orin 本地源码（如：/workspace/FluxVLA）即可同步修改容器内源码。
 
-
 分层关系如下：
 
 ```mermaid
@@ -175,7 +175,6 @@ flowchart TB
   ROS_FA --> RUNTIME
 ```
 
-
 查看完整帮助：
 
 ```bash
@@ -206,14 +205,14 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
 
 `docker/run_docker.sh` 会统一补齐运行参数、环境变量和常用挂载：
 
-| 类别 | 自动处理内容 |
-| --- | --- |
-| Docker 运行参数 | --runtime=nvidia、--network=host、--ipc=host、--shm-size=16g |
-| Python / 推理环境 | PYTHONPATH=/workspace/FluxVLA、WANDB_MODE=disabled |
-| Attention 配置 | ATTN_IMPLEMENTATION 默认 flash_attention_2；TRANSFORMERS_ATTN_IMPLEMENTATION 默认跟随 ATTN_IMPLEMENTATION |
-| 目录挂载 | 仓库根目录挂到 /workspace/FluxVLA； |
-| Robotiq 消息包 | 若存在 ~/robotiq_pkg/robotiq，挂到 /opt/ros/noetic/lib/python3/dist-packages/robotiq:ro |
-| ROS 网络变量 | 若宿主机设置了 ROS_MASTER_URI、ROS_IP 或 ROS_HOSTNAME，自动透传到容器 |
+| 类别              | 自动处理内容                                                                                              |
+| ----------------- | --------------------------------------------------------------------------------------------------------- |
+| Docker 运行参数   | --runtime=nvidia、--network=host、--ipc=host、--shm-size=16g                                              |
+| Python / 推理环境 | PYTHONPATH=/workspace/FluxVLA、WANDB_MODE=disabled                                                        |
+| Attention 配置    | ATTN_IMPLEMENTATION 默认 flash_attention_2；TRANSFORMERS_ATTN_IMPLEMENTATION 默认跟随 ATTN_IMPLEMENTATION |
+| 目录挂载          | 仓库根目录挂到 /workspace/FluxVLA；                                                                       |
+| Robotiq 消息包    | 若存在 ~/robotiq_pkg/robotiq，挂到 /opt/ros/noetic/lib/python3/dist-packages/robotiq:ro                   |
+| ROS 网络变量      | 若宿主机设置了 ROS_MASTER_URI、ROS_IP 或 ROS_HOSTNAME，自动透传到容器                                     |
 
 临时回退 eager attention：
 
@@ -334,9 +333,9 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
 
 该测速用同一个 benchmark 脚本分别测试 baseline 和 accelerated 两条路径。dummy language tokens 会构造 2 路图像对应的 image placeholder tokens，避免视觉特征没有插入语言序列导致 benchmark 偏离真实推理路径。
 
-| variant | 配置来源 | 组件路径 | 说明 |
-| --- | --- | --- | --- |
-| baseline | `cfg.model` | `EagleBackbone + FlowMatchingHead` | 普通推理路径，用作对照 |
+| variant     | 配置来源              | 组件路径                                             | 说明                         |
+| ----------- | --------------------- | ---------------------------------------------------- | ---------------------------- |
+| baseline    | `cfg.model`           | `EagleBackbone + FlowMatchingHead`                   | 普通推理路径，用作对照       |
 | accelerated | `cfg.inference_model` | `EagleInferenceBackbone + FlowMatchingInferenceHead` | Triton / CUDA Graph 加速路径 |
 
 先设置相同 checkpoint：
@@ -384,11 +383,10 @@ OK
 
 记录结果时建议使用下表：
 
-| variant | Head | Backbone | median latency | 频率 |
-| --- | --- | --- | --- | --- |
-| baseline | FlowMatchingHead | EagleBackbone | 256 ms | 3.9 Hz |
-| accelerated | FlowMatchingInferenceHead | EagleInferenceBackbone |  150-155 ms |  6.5 Hz |
-
+| variant     | Head                      | Backbone               | median latency | 频率   |
+| ----------- | ------------------------- | ---------------------- | -------------- | ------ |
+| baseline    | FlowMatchingHead          | EagleBackbone          | 256 ms         | 3.9 Hz |
+| accelerated | FlowMatchingInferenceHead | EagleInferenceBackbone | 150-155 ms     | 6.5 Hz |
 
 ## 7. 问题与排障记录
 

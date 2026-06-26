@@ -211,7 +211,8 @@ inference = dict(
     ...)
 ```
 
-<<<<<<< HEAD
+\<\<\<\<\<\<\< HEAD
+
 ### GR00T-RTC Example
 
 GR00T-RTC uses the existing GR00T acceleration path (`EagleInferenceBackbone` + `FlowMatchingInferenceHead`) and adds RTC at the runner/head boundary. The RTC runner resamples the remaining part of the previously predicted action chunk, passes it as `prev_actions` with `prefix_len`, and the accelerated head fills CUDA Graph prefix buffers before replay.
@@ -287,7 +288,8 @@ Notes:
 - Accelerated GR00T RTC currently supports `rtc_config.method='prefix'`.
 - `prefix_len` should be chosen from deployment latency and control frequency, and clamped by the runner to the remaining previous chunk length.
 - Keep `cfg.inference_model` on the accelerated classes; using `cfg.model` or `FlowMatchingHead` will run RTC but will not use the GR00T CUDA Graph/Triton acceleration path.
-=======
+  \=======
+
 ## Profiling And Graph Reuse
 
 Several optional environment variables help locate remaining host-side and CUDA Graph boundary overheads without changing default runtime behavior:
@@ -318,7 +320,8 @@ To profile whether FlashRT FA2 attention still dominates PI0.5, run the phase pr
 ```bash
 FLUXVLA_PI05_FA2=1 python scripts/profile_pi05_phases.py
 ```
->>>>>>> 722f05a (feat: add Fluxvla Orin support and inference benchmarks)
+
+> > > > > > > 722f05a (feat: add Fluxvla Orin support and inference benchmarks)
 
 ## Benchmarks
 

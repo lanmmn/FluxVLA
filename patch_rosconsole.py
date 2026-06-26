@@ -7,7 +7,9 @@ and several functions changed return types from raw pointers to smart pointers.
 import re
 from pathlib import Path
 
-target = Path("/opt/ros_noetic_ws/src/rosconsole/src/rosconsole/impl/rosconsole_log4cxx.cpp")
+target = Path(
+    "/opt/ros_noetic_ws/src/rosconsole/src/rosconsole/impl/rosconsole_log4cxx.cpp"
+)
 s = target.read_text()
 original = s
 
@@ -22,7 +24,8 @@ s = re.sub(
     r'g_log4cxx_appender = std::make_shared<Log4cxxAppender>(\1)',
     s,
 )
-s = re.sub(r'delete\s+g_log4cxx_appender\s*;', 'g_log4cxx_appender.reset();', s)
+s = re.sub(r'delete\s+g_log4cxx_appender\s*;', 'g_log4cxx_appender.reset();',
+           s)
 
 # 2) ROSConsoleStdioAppender: wrap raw pointer in shared_ptr for addAppender()
 s = re.sub(
@@ -67,6 +70,9 @@ if s == original:
         print(f"  {i}: {line}")
 else:
     target.write_text(s)
-    changes = sum(1 for a, b in zip(original.splitlines(), s.splitlines()) if a != b)
+    changes = sum(1 for a, b in zip(original.splitlines(), s.splitlines())
+                  if a != b)
     new_lines = len(s.splitlines()) - len(original.splitlines())
-    print(f"Patched rosconsole_log4cxx.cpp: {changes} lines changed, {new_lines} lines added")
+    print(
+        f"Patched rosconsole_log4cxx.cpp: {changes} lines changed, {new_lines} lines added"
+    )

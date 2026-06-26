@@ -42,7 +42,9 @@ print('CUDA:', torch.cuda.get_device_name(0))
 print('Loading weights:', CKPT_PATH)
 state = load_file(CKPT_PATH, device='cpu')
 missing, unexpected = vla.load_state_dict(state, strict=False)
-print(f'load_state_dict(strict=False): missing={len(missing)} unexpected={len(unexpected)}')
+print(
+    f'load_state_dict(strict=False): missing={len(missing)} unexpected={len(unexpected)}'
+)
 if missing[:5]:
     print('sample_missing:', missing[:5])
 if unexpected[:5]:
@@ -60,6 +62,7 @@ batch = _make_dummy_batch(
     vocab_size=vocab_size,
 )
 
+
 def one():
     return vla.predict_action(
         images=batch['images'],
@@ -69,6 +72,7 @@ def one():
         lang_masks=batch['lang_masks'],
         noise=batch['noise'],
     )
+
 
 with torch.inference_mode():
     with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
@@ -96,7 +100,9 @@ with torch.inference_mode():
 
 print('timed_runs:', runs)
 print('predict_action output shape:', tuple(out.shape))
-print(f'latency_ms: min={min(times):.3f} max={max(times):.3f} mean={statistics.mean(times):.3f} median={statistics.median(times):.3f}')
+print(
+    f'latency_ms: min={min(times):.3f} max={max(times):.3f} mean={statistics.mean(times):.3f} median={statistics.median(times):.3f}'
+)
 print(f'total_wall_ms: {sum(times):.3f}')
 if len(times) > 1:
     print(f'stdev_ms: {statistics.stdev(times):.3f}')

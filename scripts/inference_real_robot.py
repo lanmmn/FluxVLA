@@ -17,15 +17,17 @@ import time
 
 from mmengine import Config
 
-import fluxvla.transforms # noqa: F401
-import fluxvla.datasets            # noqa: F401
-import fluxvla.collators           # noqa: F401
-import fluxvla.tokenizers          # noqa: F401
-import fluxvla.engines.operators   # noqa: F401
+import fluxvla.collators  # noqa: F401
+import fluxvla.datasets  # noqa: F401
+import fluxvla.engines.operators  # noqa: F401
+import fluxvla.tokenizers  # noqa: F401
+import fluxvla.transforms  # noqa: F401
 from fluxvla.engines import build_runner_from_cfg
-from fluxvla.models.backbones.vlms.eagle import (EagleBackbone,  # noqa: F401
-                                                 EagleInferenceBackbone)
-from fluxvla.models.heads.flow_matching_head import FlowMatchingHead  # noqa: F401
+from fluxvla.models.backbones.vlms.eagle import EagleBackbone  # noqa: F401
+from fluxvla.models.backbones.vlms.eagle import \
+    EagleInferenceBackbone  # noqa: F401
+from fluxvla.models.heads.flow_matching_head import \
+    FlowMatchingHead  # noqa: F401
 from fluxvla.models.heads.flow_matching_inference_head import \
     FlowMatchingInferenceHead  # noqa: F401
 from fluxvla.models.vlas.llava_vla import LlavaVLA  # noqa: F401
@@ -63,13 +65,16 @@ if __name__ == '__main__':
     cfg.inference.cfg = cfg
     stage_t0 = time.perf_counter()
     inference_runner = build_runner_from_cfg(cfg.inference)
-    print(f'[Startup] build_runner_from_cfg: {time.perf_counter() - stage_t0:.1f}s',
-          flush=True)
+    print(
+        f'[Startup] build_runner_from_cfg: {time.perf_counter() - stage_t0:.1f}s',
+        flush=True)
     stage_t0 = time.perf_counter()
     inference_runner.run_setup()
-    print(f'[Startup] run_setup_ros: {time.perf_counter() - stage_t0:.1f}s',
-          flush=True)
-    print(f'[Startup] total_before_interactive_loop: {time.perf_counter() - startup_t0:.1f}s',
-          flush=True)
+    print(
+        f'[Startup] run_setup_ros: {time.perf_counter() - stage_t0:.1f}s',
+        flush=True)
+    print(
+        f'[Startup] total_before_interactive_loop: {time.perf_counter() - startup_t0:.1f}s',
+        flush=True)
 
     inference_runner.run()

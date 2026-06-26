@@ -41,6 +41,7 @@ import torchvision.transforms.functional as TVF
 from PIL import Image as PILImage
 from PIL.Image import Image
 from timm.models.vision_transformer import Block, VisionTransformer
+
 try:
     from torch.distributed.fsdp.wrap import (_module_wrap_policy, _or_policy,
                                              transformer_auto_wrap_policy)
@@ -230,7 +231,9 @@ class VisionBackbone(nn.Module, ABC):
 
 def _require_fsdp_wrap_support() -> None:
     if _FSDP_WRAP_IMPORT_ERROR is not None:
-        raise RuntimeError('FSDP wrapping policies are unavailable in this torch build') from _FSDP_WRAP_IMPORT_ERROR
+        raise RuntimeError(
+            'FSDP wrapping policies are unavailable in this torch build'
+        ) from _FSDP_WRAP_IMPORT_ERROR
 
 
 class TimmViTBackbone(VisionBackbone, ABC):

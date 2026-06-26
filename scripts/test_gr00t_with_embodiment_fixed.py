@@ -5,7 +5,6 @@
 """
 
 from __future__ import annotations
-
 import argparse
 import os
 import statistics
@@ -34,7 +33,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument('--lang-len', type=int, default=48)
     p.add_argument('--image-size', type=int, default=224)
     p.add_argument('--seed', type=int, default=0)
-    p.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
+    p.add_argument(
+        '--device',
+        type=str,
+        default='cuda' if torch.cuda.is_available() else 'cpu')
     p.add_argument('--predict-runs', type=int, default=100)
     p.add_argument('--warmup', type=int, default=5)
     return p.parse_args()
@@ -80,10 +82,12 @@ def _make_dummy_batch(
         device=device,
         dtype=torch.long,
     )
-    lang_masks = torch.ones(batch_size, lang_len, dtype=torch.bool, device=device)
+    lang_masks = torch.ones(
+        batch_size, lang_len, dtype=torch.bool, device=device)
 
     # 状态: (B, state_dim)
-    states = torch.randn(batch_size, state_dim, device=device, dtype=torch.float32)
+    states = torch.randn(
+        batch_size, state_dim, device=device, dtype=torch.float32)
 
     # 噪声: (B, action_dim, action_dim)
     noise = torch.randn(
@@ -150,10 +154,13 @@ def main() -> int:
         print(f'Loading weights: {ckpt_path}')
         state = torch.load(str(ckpt_path), map_location='cpu')
         if isinstance(state, dict) and 'model' in state:
-            print('Detected training checkpoint; loading checkpoint[\'model\']')
+            print(
+                'Detected training checkpoint; loading checkpoint[\'model\']')
             state = state['model']
         missing, unexpected = vla.load_state_dict(state, strict=False)
-        print(f'load_state_dict: missing={len(missing)}, unexpected={len(unexpected)}')
+        print(
+            f'load_state_dict: missing={len(missing)}, unexpected={len(unexpected)}'
+        )
 
     vla.eval()
 
@@ -169,7 +176,9 @@ def main() -> int:
     num_embodiments = model_cfg.get('num_embodiments', 1)
     vocab_size = 257152
 
-    print(f'Model params: state_dim={state_dim}, action_dim={action_dim}, ori_action_dim={ori_action_dim}, num_embodiments={num_embodiments}')
+    print(
+        f'Model params: state_dim={state_dim}, action_dim={action_dim}, ori_action_dim={ori_action_dim}, num_embodiments={num_embodiments}'
+    )
 
     # 构造 dummy batch
     batch = _make_dummy_batch(
@@ -184,17 +193,18 @@ def main() -> int:
         num_embodiments=num_embodiments,
     )
 
-    print(f'Benchmark predict_action: warmup={args.warmup}, runs={args.predict_runs} (dummy tensors)...')
+    print(
+        f'Benchmark predict_action: warmup={args.warmup}, runs={args.predict_runs} (dummy tensors)...'
+    )
 
     times = []
     actions = None
 
     with torch.inference_mode():
         with torch.autocast(
-            device_type=device.type,
-            dtype=torch.bfloat16,
-            enabled=device.type == 'cuda'
-        ):
+                device_type=device.type,
+                dtype=torch.bfloat16,
+                enabled=device.type == 'cuda'):
             # 预热
             for _ in range(args.warmup):
                 try:
@@ -232,7 +242,9 @@ def main() -> int:
         print()
 
     total = sum(times)
-    print(f'total_wall_predict={total*1000:.3f} ms ({args.predict_runs} runs, excl. warmup)')
+    print(
+        f'total_wall_predict={total*1000:.3f} ms ({args.predict_runs} runs, excl. warmup)'
+    )
 
     print('OK')
     return 0

@@ -1,4 +1,3 @@
-
 ## Step 0: 准备工作
 
 ### 0.1 挂载 NVMe SSD（可选但强烈建议）
@@ -24,8 +23,6 @@ echo '/dev/nvme0n1p1 /mnt/nvme ext4 defaults 0 2' | sudo tee -a /etc/fstab
 # 创建工作目录
 mkdir -p /mnt/nvme/{checkpoints,datasets,work_dirs}
 ```
-
-
 
 ### 0.2 配置 pip 国内源
 

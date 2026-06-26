@@ -101,23 +101,24 @@ def transformer_encoder(weights,
 
         if i != num_encoder_layers - 1:
             if use_flashrt_fa2:
-                raise RuntimeError('FlashRT FA2 path has been removed from FluxVLA mainline')
+                raise RuntimeError(
+                    'FlashRT FA2 path has been removed from FluxVLA mainline')
             else:
                 scale = 1.0 / (256**0.5)
                 total_queries = buffers['encoder_Q'].shape[0]
                 total_keys = encoder_seq_len
-                matmul_abT_scale[(((total_queries + 31) // 32) *
-                                  ((total_keys + 31) // 32), )](
-                                      buffers['encoder_Q'],
-                                      buffers['encoder_K'][i, :encoder_seq_len],
-                                      buffers['encoder_logits_buf'],
-                                      total_queries,
-                                      total_keys,
-                                      256,
-                                      scale,
-                                      BLOCK_SIZE_M=32,
-                                      BLOCK_SIZE_N=32,
-                                      BLOCK_SIZE_K=64)
+                matmul_abT_scale[(((total_queries + 31) // 32) * (
+                    (total_keys + 31) // 32), )](
+                        buffers['encoder_Q'],
+                        buffers['encoder_K'][i, :encoder_seq_len],
+                        buffers['encoder_logits_buf'],
+                        total_queries,
+                        total_keys,
+                        256,
+                        scale,
+                        BLOCK_SIZE_M=32,
+                        BLOCK_SIZE_N=32,
+                        BLOCK_SIZE_K=64)
 
                 softmax_kernel_masklen[((total_queries + 3) // 4, )](
                     buffers['encoder_logits_buf'],
@@ -223,21 +224,21 @@ def transformer_decoder(weights,
             total_keys = prefix_keys + suffix_keys
 
             if use_flashrt_fa2:
-                raise RuntimeError('FlashRT FA2 path has been removed from FluxVLA mainline')
+                raise RuntimeError(
+                    'FlashRT FA2 path has been removed from FluxVLA mainline')
             else:
-                matmul_abT_scale[(((total_queries + 31) // 32) *
-                                  ((total_keys + 31) // 32), )](
-                                      buffers['decoder_q_buf'],
-                                      buffers['encoder_K'][i, :encoder_seq_len +
-                                                           seq_len],
-                                      buffers['decoder_logits_buf'],
-                                      total_queries,
-                                      total_keys,
-                                      256,
-                                      256**-0.5,
-                                      BLOCK_SIZE_M=32,
-                                      BLOCK_SIZE_N=32,
-                                      BLOCK_SIZE_K=64)
+                matmul_abT_scale[(((total_queries + 31) // 32) * (
+                    (total_keys + 31) // 32), )](
+                        buffers['decoder_q_buf'],
+                        buffers['encoder_K'][i, :encoder_seq_len + seq_len],
+                        buffers['decoder_logits_buf'],
+                        total_queries,
+                        total_keys,
+                        256,
+                        256**-0.5,
+                        BLOCK_SIZE_M=32,
+                        BLOCK_SIZE_N=32,
+                        BLOCK_SIZE_K=64)
 
                 softmax_kernel_prefix_suffix[((total_queries + 3) // 4, )](
                     buffers['decoder_logits_buf'],
@@ -469,31 +470,53 @@ class PI05FlowMatchingInference(PI05FlowMatching):
                 'encoder_fa2_o':
                 torch.zeros(1, enc, nkv, hd, dtype=bf, device=dev),
                 'encoder_fa2_lse':
-                torch.zeros(1, nkv, ((enc + 127) // 128) * 128,
-                            dtype=torch.float32,
-                            device=dev),
+                torch.zeros(
+                    1,
+                    nkv, ((enc + 127) // 128) * 128,
+                    dtype=torch.float32,
+                    device=dev),
                 'encoder_fa2_lse_accum':
-                torch.zeros(min(128, (enc + 63) // 64), 1, nkv, enc,
-                            dtype=torch.float32,
-                            device=dev),
+                torch.zeros(
+                    min(128, (enc + 63) // 64),
+                    1,
+                    nkv,
+                    enc,
+                    dtype=torch.float32,
+                    device=dev),
                 'encoder_fa2_o_accum':
-                torch.zeros(min(128, (enc + 63) // 64), 1, nkv, enc, hd,
-                            dtype=torch.float32,
-                            device=dev),
+                torch.zeros(
+                    min(128, (enc + 63) // 64),
+                    1,
+                    nkv,
+                    enc,
+                    hd,
+                    dtype=torch.float32,
+                    device=dev),
                 'decoder_fa2_o':
                 torch.zeros(1, dec, nkv, hd, dtype=bf, device=dev),
                 'decoder_fa2_lse':
-                torch.zeros(1, nkv, ((dec + 127) // 128) * 128,
-                            dtype=torch.float32,
-                            device=dev),
+                torch.zeros(
+                    1,
+                    nkv, ((dec + 127) // 128) * 128,
+                    dtype=torch.float32,
+                    device=dev),
                 'decoder_fa2_lse_accum':
-                torch.zeros(min(128, (enc + dec + 63) // 64), 1, nkv, dec,
-                            dtype=torch.float32,
-                            device=dev),
+                torch.zeros(
+                    min(128, (enc + dec + 63) // 64),
+                    1,
+                    nkv,
+                    dec,
+                    dtype=torch.float32,
+                    device=dev),
                 'decoder_fa2_o_accum':
-                torch.zeros(min(128, (enc + dec + 63) // 64), 1, nkv, dec, hd,
-                            dtype=torch.float32,
-                            device=dev),
+                torch.zeros(
+                    min(128, (enc + dec + 63) // 64),
+                    1,
+                    nkv,
+                    dec,
+                    hd,
+                    dtype=torch.float32,
+                    device=dev),
             })
 
     def _init_rope_table(self):
@@ -543,10 +566,12 @@ class PI05FlowMatchingInference(PI05FlowMatching):
         if (self._use_flashrt_fa2 and self._cuda_graph_cache_size > 0
                 and self._captured_encoder_seq_len is not None):
             if (self._captured_encoder_seq_len not in self._cuda_graph_cache
-                    and len(self._cuda_graph_cache) >= self._cuda_graph_cache_size):
+                    and len(self._cuda_graph_cache) >=
+                    self._cuda_graph_cache_size):
                 oldest_key = next(iter(self._cuda_graph_cache))
                 del self._cuda_graph_cache[oldest_key]
-            self._cuda_graph_cache[self._captured_encoder_seq_len] = self._cuda_graph
+            self._cuda_graph_cache[
+                self._captured_encoder_seq_len] = self._cuda_graph
         print('[Triton Inference] CUDA Graph recorded successfully!')
 
     def _triton_forward(self, images_nhwc, prompt_embeds, prompt_len,
@@ -563,10 +588,14 @@ class PI05FlowMatchingInference(PI05FlowMatching):
             Denoised actions [chunk_size, 32] bfloat16.
         """
         profile = self._pi05_profile
-        profile_start = torch.cuda.Event(enable_timing=True) if profile else None
-        profile_after_copy = torch.cuda.Event(enable_timing=True) if profile else None
-        profile_before_replay = torch.cuda.Event(enable_timing=True) if profile else None
-        profile_after_replay = torch.cuda.Event(enable_timing=True) if profile else None
+        profile_start = torch.cuda.Event(
+            enable_timing=True) if profile else None
+        profile_after_copy = torch.cuda.Event(
+            enable_timing=True) if profile else None
+        profile_before_replay = torch.cuda.Event(
+            enable_timing=True) if profile else None
+        profile_after_replay = torch.cuda.Event(
+            enable_timing=True) if profile else None
         if profile:
             profile_start.record()
 

@@ -12,12 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from importlib import import_module
+
 import torch
 from torch.autograd import Function
 
-from importlib import import_module
-
-gemma_rotary_embedding_ext = import_module('.gemma_rotary_embedding_ext', __package__)
+gemma_rotary_embedding_ext = import_module('.gemma_rotary_embedding_ext',
+                                           __package__)
 
 
 class GemmaRotaryEmbedding(Function):

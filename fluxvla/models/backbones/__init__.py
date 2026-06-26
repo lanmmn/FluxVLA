@@ -12,18 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 def _is_optional_torch_distributed_error(exc: ImportError) -> bool:
-	name = getattr(exc, 'name', '') or ''
-	message = str(exc)
-	return (name.startswith('torch.distributed')
-			or name.startswith('torch._C._distributed_c10d')
-			or 'torch._C._distributed_c10d' in message)
+    name = getattr(exc, 'name', '') or ''
+    message = str(exc)
+    return (name.startswith('torch.distributed')
+            or name.startswith('torch._C._distributed_c10d')
+            or 'torch._C._distributed_c10d' in message)
 
 
 try:
-	from .llms import *  # noqa: F401, F403
+    from .llms import *  # noqa: F401, F403
 except ImportError as exc:
-	if not _is_optional_torch_distributed_error(exc):
-		raise
+    if not _is_optional_torch_distributed_error(exc):
+        raise
 from .visions import *  # noqa: F401, F403
 from .vlms import *  # noqa: F401, F403
