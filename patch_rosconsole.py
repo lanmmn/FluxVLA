@@ -67,12 +67,12 @@ s = re.sub(
 if s == original:
     print('WARNING: no changes were made!')
     for i, line in enumerate(original.splitlines()[:100], 1):
-        print(f"  {i}: {line}")
+        print(f'  {i}: {line}')
 else:
     target.write_text(s)
     changes = sum(1 for a, b in zip(original.splitlines(), s.splitlines())
                   if a != b)
     new_lines = len(s.splitlines()) - len(original.splitlines())
     print(
-        f"Patched rosconsole_log4cxx.cpp: {changes} lines changed, {new_lines} lines added"
+        f'Patched rosconsole_log4cxx.cpp: {changes} lines changed, {new_lines} lines added'
     )
