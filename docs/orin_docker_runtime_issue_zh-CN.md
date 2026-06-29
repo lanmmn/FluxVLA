@@ -135,6 +135,8 @@ cat /sys/class/net/eth0/speed
 
 `/gripper/position` 使用 UR3 端自定义 ROS 消息 `robotiq/StampedFloat32`，不能简单替换成 `std_msgs/Float32`。
 
+这个包是可选项，普通开源用户默认不会有，也不需要安装。只有使用本文档中的 UR3 + Robotiq 真机链路，并且夹爪话题发布为 `robotiq/StampedFloat32` 时才需要。如果只跑仿真、benchmark、非 UR3 推理，或者使用自己的机器人/夹爪消息类型，可以跳过该步骤，或按自己的 ROS 话题和消息类型修改 operator。
+
 正确做法是把 UR3 catkin 生成的纯 Python 消息包解引用软链接后放到 Orin：
 
 ```bash
@@ -143,13 +145,13 @@ tar -C /home/ur3/ur_ws/devel/lib/python3/dist-packages \
   -h --exclude='__pycache__' -czf /tmp/robotiq.tgz robotiq
 
 # 拷到 Orin 后
-mkdir -p ~/sober/robotiq_pkg
-rm -rf ~/sober/robotiq_pkg/robotiq
-tar -C ~/sober/robotiq_pkg -xzf /tmp/robotiq.tgz
-find ~/sober/robotiq_pkg/robotiq -type l -print
+mkdir -p ~/robotiq_pkg
+rm -rf ~/robotiq_pkg/robotiq
+tar -C ~/robotiq_pkg -xzf /tmp/robotiq.tgz
+find ~/robotiq_pkg/robotiq -type l -print
 ```
 
-`find` 不应再看到软链接。`docker/run_docker.sh` 会自动把该目录挂进 ROS site-packages。
+`find` 不应再看到软链接。`docker/run_docker.sh` 会自动探测 `~/robotiq_pkg/robotiq` 并挂进 ROS site-packages；如果放在其它位置，可启动时设置 `ROBOTIQ_PY_PKG=/path/to/robotiq`。
 
 验证：
 

@@ -1,5 +1,11 @@
 # Jetson Orin Docker 与运行测试指南
 
+> 日期：2026-06-22\
+> 适用范围：Jetson AGX Orin / JetPack 6.2 / L4T R36.4.x / FluxVLA Docker 运行环境\
+> 前置条件：Orin 已按刷机文档完成 JetPack 初始化，并已验证 CUDA、Docker 与 NVIDIA runtime 可用。
+
+本文覆盖刷机之后的 FluxVLA Docker 构建、容器运行、基础测试、ROS/UR3 真机测试和最近调试得到的 Q&A。
+
 ## 1. 推荐路线
 
 推荐把 Orin 宿主机当作稳定运行底座：宿主机负责 JetPack、Docker、NVMe、源码和模型数据；FluxVLA 的 Python、PyTorch、Triton、FlashAttention、ROS Noetic 运行环境优先放在 Docker 镜像内。
@@ -76,7 +82,7 @@ sudo apt update
 sudo apt install -y rsync
 sudo systemctl stop docker
 sudo mkdir -p /mnt/nvme/docker
-# sudo apt install rsync
+# sudo apt install rsync 
 sudo rsync -aHAX /var/lib/docker/ /mnt/nvme/docker/
 
 sudo mkdir -p /etc/docker
@@ -205,14 +211,14 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
 
 `docker/run_docker.sh` 会统一补齐运行参数、环境变量和常用挂载：
 
-| 类别              | 自动处理内容                                                                                                                                 |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Docker 运行参数   | --runtime=nvidia、--network=host、--ipc=host、--shm-size=16g                                                                                 |
-| Python / 推理环境 | PYTHONPATH=/workspace/FluxVLA、WANDB_MODE=disabled                                                                                           |
-| Attention 配置    | ATTN_IMPLEMENTATION 默认 flash_attention_2；TRANSFORMERS_ATTN_IMPLEMENTATION 默认跟随 ATTN_IMPLEMENTATION                                    |
-| 目录挂载          | 仓库根目录挂到 /workspace/FluxVLA；                                                                                                          |
+| 类别              | 自动处理内容                                                                                              |
+| ----------------- | --------------------------------------------------------------------------------------------------------- |
+| Docker 运行参数   | --runtime=nvidia、--network=host、--ipc=host、--shm-size=16g                                              |
+| Python / 推理环境 | PYTHONPATH=/workspace/FluxVLA、WANDB_MODE=disabled                                                        |
+| Attention 配置    | ATTN_IMPLEMENTATION 默认 flash_attention_2；TRANSFORMERS_ATTN_IMPLEMENTATION 默认跟随 ATTN_IMPLEMENTATION |
+| 目录挂载          | 仓库根目录挂到 /workspace/FluxVLA；                                                                       |
 | Robotiq 消息包    | 自动探测 `~/robotiq_pkg/robotiq`；也可用 `ROBOTIQ_PY_PKG=/path/to/robotiq` 指定，挂到 `/opt/ros/noetic/lib/python3/dist-packages/robotiq:ro` |
-| ROS 网络变量      | 若宿主机设置了 ROS_MASTER_URI、ROS_IP 或 ROS_HOSTNAME，自动透传到容器                                                                        |
+| ROS 网络变量      | 若宿主机设置了 ROS_MASTER_URI、ROS_IP 或 ROS_HOSTNAME，自动透传到容器                                     |
 
 临时回退 eager attention：
 
@@ -299,7 +305,7 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
 
 通过标准：输出 `robotiq/StampedFloat32`。
 
-### 5.5 GR00T checkpoint test
+### 5.5 GR00T checkpoint dummy test
 
 先确认 checkpoint 文件本身可被 `torch.load` 读取：
 
@@ -320,7 +326,7 @@ PY
 
 ```bash
 FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
-  python3 scripts/test_gr00t_with_embodiment.py \
+  python3 scripts/test_gr00t_with_embodiment_fixed.py \
     --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
     --ckpt "$CKPT" \
     --warmup 0 \
@@ -329,64 +335,121 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
 
 通过标准：`predict_action output shape` 出现，命令正常退出。
 
-### 5.6 GR00T baseline / accelerated 100 次测速 benchmark
+### 5.7 Pi0.5 Triton 测试
 
-该测速用同一个 benchmark 脚本分别测试 baseline 和 accelerated :
-
-| variant     | 配置来源              | 组件路径                                             | 说明                         |
-| ----------- | --------------------- | ---------------------------------------------------- | ---------------------------- |
-| baseline    | `cfg.model`           | `EagleBackbone + FlowMatchingHead`                   | 普通推理路径，用作对照       |
-| accelerated | `cfg.inference_model` | `EagleInferenceBackbone + FlowMatchingInferenceHead` | Triton / CUDA Graph 加速路径 |
-
-先设置相同 checkpoint：
+已有实测脚本可直接跑：
 
 ```bash
-CKPT=../gr00t_eagle_3b_ur3_full_finetune_orin/checkpoints/step-006000-epoch-00-loss=0.1157.safetensors
+FLUXVLA_IMAGE=fluxvla:orin-fa docker/run_docker.sh \
+  python3 /home/<user>/FluxVLA/test/test_models/pi05_triton_bench_real_100.py
 ```
 
-baseline：
+首次运行可能录制 CUDA Graph，耗时较长。历史记录中 100-run mean latency 约在 `583-585 ms` 区间。
+
+## 6. ROS / UR3 真机运行测试
+
+### 6.1 网络和 ROS 环境
+
+推荐使用 RJ45 千兆直连，而不是 USB 虚拟网卡。原始 1280x720 RGB 图像 30Hz 约需 633Mbps，USB2 虚拟网卡通常只能到约 7Hz。
+
+已验证的千兆规划：
+
+| 设备             | IP                | 说明                  |
+| ---------------- | ----------------- | --------------------- |
+| UR3 / ROS Master | `172.16.0.200/24` | `roscore` 所在机器    |
+| Orin             | `172.16.0.100/24` | 容器使用 host network |
+
+UR3 端启动相机和机器人节点前：
 
 ```bash
-FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
-  python3 test/test_models/test-gr00t-100times.py \
-    --variant baseline \
-    --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
-    --ckpt "$CKPT" \
-    --warmup 5 \
-    --predict-runs 100
+export ROS_MASTER_URI=http://172.16.0.200:11311
+export ROS_IP=172.16.0.200
 ```
 
-accelerated：
+Orin 宿主机或容器内：
 
 ```bash
-FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
-  python3 test/test_models/test-gr00t-100times.py \
-    --variant accelerated \
-    --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
-    --ckpt "$CKPT" \
-    --warmup 5 \
-    --predict-runs 100
+export ROS_MASTER_URI=http://172.16.0.200:11311
+export ROS_IP=172.16.0.100
 ```
 
-期望关键信息：
+启动容器：
+
+```bash
+cd /home/limx/sober/FluxVLA
+ROS_MASTER_URI=http://172.16.0.200:11311 \
+ROS_IP=172.16.0.100 \
+FLUXVLA_IMAGE=fluxvla:orin-ros-fa \
+docker/run_docker.sh
+```
+
+容器内兜底加主机名解析：
+
+```bash
+echo "172.16.0.200 ur3" >> /etc/hosts
+rostopic list
+```
+
+验证相机带宽：
+
+```bash
+rostopic hz /front_camera/color/image_raw
+rostopic hz /wrist_camera/color/image_raw
+```
+
+通过标准：千兆链路下 front / wrist 原始图接近 30Hz。若只有 4-9Hz，优先检查两端网口协商速率和路由：
+
+```bash
+cat /sys/class/net/eth0/speed
+ip route get 172.16.0.200
+```
+
+Orin 物理网口名可能不是 `eth0`，按 `ip -br link` 结果替换。
+
+### 6.2 真机推理命令
+
+必须在 `/workspace/FluxVLA` 下运行，因为配置中的模型目录包含相对路径。
+
+```bash
+cd /workspace/FluxVLA
+
+export ROS_MASTER_URI=http://172.16.0.200:11311
+export ROS_IP=172.16.0.100
+
+PYTHONUNBUFFERED=1 python3 -u scripts/inference_real_robot.py \
+  --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
+  --ckpt-path /mnt/nvme/gr00t-ur3-checkpoint/fab7d175_gr00t_eagle_3b_ur3_full_finetune_bs64/checkpoints/step-042600-epoch-06-loss=0.0238.pt
+```
+
+checkpoint 路径必须指向 `checkpoints/*.pt` 或转换后的 `.model.safetensors` 文件，不要指向 checkpoint 根目录。代码会通过 checkpoint 的上两级目录查找 `config.json`、`dataset_statistics.json` 和 tokenizer。
+
+模型加载完成后会进入交互提示：
 
 ```text
-Head: FlowMatchingInferenceHead
-Backbone: EagleInferenceBackbone
-image_token_id=151669, image_token_count=512
-predict_action output shape: (1, 32, 7)
-latency_ms: ... median= 190 ms ...
-OK
+Enter task ID (or press Enter for default):
 ```
 
-`image_token_count=512` 表示 2 路图像各 256 个 image tokens 已经放入 `lang_tokens`，视觉 embedding 会插入到 language sequence 中参与后续 attention。若该值为 0，说明测速输入不含 image tokens，结果不能代表真实图文推理路径。
+不要自动输入任务 ID。真机动作前必须人工确认机械臂、夹爪、相机、工作空间和急停状态。
 
-记录结果时建议使用下表：
+当前默认代码路径通常只打印 `actions`，真实下发动作的调用是注释状态；只有确认动作合理并手动打开执行行后才会控制机械臂。
 
-| variant           | median latency | frequency |
-| ----------------- | -------------- | --------- |
-| GR00T-baseline    | 256 ms         | 3.9 Hz    |
-| GR00T-accelerated | 190 ms         | 5.26 Hz   |
+### 6.3 `roscore` 不可用时的临时 ROS master
+
+近期调试发现当前 `fluxvla:orin-ros-fa` 镜像可以运行 ROS Python 模块，但普通 `roscore` 在某些环境下不完整：
+
+```text
+ModuleNotFoundError: No module named 'defusedxml'
+RLException: Invalid <param> tag: Cannot load command parameter [rosversion]: no such command [['rosversion', 'roslaunch']].
+```
+
+如果只是为了本机验证 `rospy` 注册流程，可临时用 `rosmaster` 直接启动 master：
+
+```bash
+FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
+  bash -lc 'python3 -m pip install -q defusedxml >/dev/null 2>&1 || true; exec rosmaster --core -p 11311'
+```
+
+长期修复应放在 ROS 镜像层：补齐 `defusedxml`，并保证 `rosversion` / `roslaunch` 命令环境完整，使普通 `roscore` 可直接工作。
 
 ## 7. 问题与排障记录
 

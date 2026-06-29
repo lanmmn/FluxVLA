@@ -1,5 +1,11 @@
 # Jetson Orin Docker and Runtime Test Guide
 
+> Date: 2026-06-22
+> Scope: Jetson AGX Orin / JetPack 6.2 / L4T R36.4.x / FluxVLA Docker runtime environment
+> Prerequisites: Orin has completed JetPack initialization according to the flashing guide, and CUDA, Docker, and the NVIDIA runtime have been verified.
+
+This document covers FluxVLA Docker build steps after flashing, container runtime, basic tests, ROS/UR3 real-robot tests, and Q&A from recent debugging.
+
 ## 1. Recommended Path
 
 Use the Orin host as the stable runtime base. The host should own JetPack, Docker, NVMe storage, source code, and model data. Put the FluxVLA Python, PyTorch, Triton, FlashAttention, and ROS Noetic runtime environment inside Docker images whenever possible.
@@ -205,14 +211,14 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
 
 `docker/run_docker.sh` fills in runtime arguments, environment variables, and common mounts:
 
-| Category                       | Automatic handling                                                                                                                                                    |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Docker runtime args            | `--runtime=nvidia`, `--network=host`, `--ipc=host`, `--shm-size=16g`                                                                                                  |
-| Python / inference environment | `PYTHONPATH=/workspace/FluxVLA`, `WANDB_MODE=disabled`                                                                                                                |
-| Attention configuration        | `ATTN_IMPLEMENTATION` defaults to `flash_attention_2`; `TRANSFORMERS_ATTN_IMPLEMENTATION` follows `ATTN_IMPLEMENTATION` by default                                    |
-| Directory mounts               | Repository root mounted to `/workspace/FluxVLA`                                                                                                                       |
-| Robotiq message package        | Auto-detects `~/robotiq_pkg/robotiq`; override with `ROBOTIQ_PY_PKG=/path/to/robotiq`. It is mounted read-only to `/opt/ros/noetic/lib/python3/dist-packages/robotiq` |
-| ROS network variables          | If the host has `ROS_MASTER_URI`, `ROS_IP`, or `ROS_HOSTNAME`, they are passed through to the container                                                               |
+| Category                       | Automatic handling                                                                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Docker runtime args            | `--runtime=nvidia`, `--network=host`, `--ipc=host`, `--shm-size=16g`                                                               |
+| Python / inference environment | `PYTHONPATH=/workspace/FluxVLA`, `WANDB_MODE=disabled`                                                                             |
+| Attention configuration        | `ATTN_IMPLEMENTATION` defaults to `flash_attention_2`; `TRANSFORMERS_ATTN_IMPLEMENTATION` follows `ATTN_IMPLEMENTATION` by default |
+| Directory mounts               | Repository root mounted to `/workspace/FluxVLA`                                                                                    |
+| Robotiq message package        | Auto-detects `~/robotiq_pkg/robotiq`; override with `ROBOTIQ_PY_PKG=/path/to/robotiq`. It is mounted read-only to `/opt/ros/noetic/lib/python3/dist-packages/robotiq`                  |
+| ROS network variables          | If the host has `ROS_MASTER_URI`, `ROS_IP`, or `ROS_HOSTNAME`, they are passed through to the container                            |
 
 Temporarily fall back to eager attention:
 
@@ -299,7 +305,7 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
 
 Pass criteria: output is `robotiq/StampedFloat32`.
 
-### 5.5 GR00T Checkpoint Test
+### 5.5 GR00T Checkpoint Dummy Test
 
 First confirm that the checkpoint file can be read by `torch.load`:
 
@@ -320,7 +326,7 @@ Then run one short inference:
 
 ```bash
 FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
-  python3 scripts/test_gr00t_with_embodiment.py \
+  python3 scripts/test_gr00t_with_embodiment_fixed.py \
     --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
     --ckpt "$CKPT" \
     --warmup 0 \
@@ -329,64 +335,121 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
 
 Pass criteria: `predict_action output shape` appears and the command exits normally.
 
-### 5.6 GR00T Baseline / Accelerated 100-Run Benchmark
+### 5.7 Pi0.5 Triton Test
 
-This benchmark uses the same script to test both the baseline and accelerated paths. Dummy language tokens construct image placeholder tokens for two image streams, so visual features are inserted into the language sequence and the benchmark matches the real inference path more closely.
-
-| Variant     | Config source         | Component path                                       | Description                                |
-| ----------- | --------------------- | ---------------------------------------------------- | ------------------------------------------ |
-| baseline    | `cfg.model`           | `EagleBackbone + FlowMatchingHead`                   | Normal inference path, used as the control |
-| accelerated | `cfg.inference_model` | `EagleInferenceBackbone + FlowMatchingInferenceHead` | Triton / CUDA Graph accelerated path       |
-
-Set the same checkpoint first:
+An existing measured script can be run directly:
 
 ```bash
-CKPT=../gr00t_eagle_3b_ur3_full_finetune_orin/checkpoints/step-006000-epoch-00-loss=0.1157.safetensors
+FLUXVLA_IMAGE=fluxvla:orin-fa docker/run_docker.sh \
+  python3 /home/<user>/FluxVLA/test/test_models/pi05_triton_bench_real_100.py
 ```
 
-Baseline:
+The first run may record a CUDA Graph and take longer. Historical records show 100-run mean latency around `583-585 ms`.
+
+## 6. ROS / UR3 Real-Robot Runtime Test
+
+### 6.1 Network and ROS Environment
+
+Use direct RJ45 gigabit Ethernet instead of a USB virtual NIC. Raw 1280x720 RGB images at 30 Hz require about 633 Mbps, while a USB2 virtual NIC usually only reaches about 7 Hz.
+
+Verified gigabit plan:
+
+| Device           | IP                | Description                 |
+| ---------------- | ----------------- | --------------------------- |
+| UR3 / ROS Master | `172.16.0.200/24` | Machine running `roscore`   |
+| Orin             | `172.16.0.100/24` | Container uses host network |
+
+Before starting camera and robot nodes on the UR3 side:
 
 ```bash
-FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
-  python3 test/test_models/test-gr00t-100times.py \
-    --variant baseline \
-    --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
-    --ckpt "$CKPT" \
-    --warmup 5 \
-    --predict-runs 100
+export ROS_MASTER_URI=http://172.16.0.200:11311
+export ROS_IP=172.16.0.200
 ```
 
-Accelerated:
+On the Orin host or inside the container:
 
 ```bash
-FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
-  python3 test/test_models/test-gr00t-100times.py \
-    --variant accelerated \
-    --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
-    --ckpt "$CKPT" \
-    --warmup 5 \
-    --predict-runs 100
+export ROS_MASTER_URI=http://172.16.0.200:11311
+export ROS_IP=172.16.0.100
 ```
 
-Expected key output:
+Start the container:
+
+```bash
+cd /home/limx/sober/FluxVLA
+ROS_MASTER_URI=http://172.16.0.200:11311 \
+ROS_IP=172.16.0.100 \
+FLUXVLA_IMAGE=fluxvla:orin-ros-fa \
+docker/run_docker.sh
+```
+
+Add a fallback host-name mapping inside the container:
+
+```bash
+echo "172.16.0.200 ur3" >> /etc/hosts
+rostopic list
+```
+
+Validate camera bandwidth:
+
+```bash
+rostopic hz /front_camera/color/image_raw
+rostopic hz /wrist_camera/color/image_raw
+```
+
+Pass criteria: front and wrist raw images should be close to 30 Hz on a gigabit link. If they are only 4-9 Hz, first check negotiated link speed and routing on both ends:
+
+```bash
+cat /sys/class/net/eth0/speed
+ip route get 172.16.0.200
+```
+
+The Orin physical network interface might not be `eth0`; replace it according to `ip -br link`.
+
+### 6.2 Real-Robot Inference Command
+
+Run from `/workspace/FluxVLA`, because the config contains model directories as relative paths.
+
+```bash
+cd /workspace/FluxVLA
+
+export ROS_MASTER_URI=http://172.16.0.200:11311
+export ROS_IP=172.16.0.100
+
+PYTHONUNBUFFERED=1 python3 -u scripts/inference_real_robot.py \
+  --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
+  --ckpt-path /mnt/nvme/gr00t-ur3-checkpoint/fab7d175_gr00t_eagle_3b_ur3_full_finetune_bs64/checkpoints/step-042600-epoch-06-loss=0.0238.pt
+```
+
+The checkpoint path must point to a concrete `checkpoints/*.pt` file or a converted `.model.safetensors` file. Do not point it to the checkpoint root directory. The code finds `config.json`, `dataset_statistics.json`, and the tokenizer by walking two levels up from the checkpoint file.
+
+After the model finishes loading, it enters the interactive prompt:
 
 ```text
-Head: FlowMatchingInferenceHead
-Backbone: EagleInferenceBackbone
-image_token_id=151669, image_token_count=512
-predict_action output shape: (1, 32, 7)
-latency_ms: ... median=about 150-155 ms ...
-OK
+Enter task ID (or press Enter for default):
 ```
 
-`image_token_count=512` means two image streams, 256 image tokens each, have been inserted into `lang_tokens`, so visual embeddings participate in the following attention computation. If this value is 0, the benchmark input has no image tokens and the result does not represent the real vision-language inference path.
+Do not input the task ID automatically. Before any real robot motion, a human must confirm the robot arm, gripper, cameras, workspace, and emergency stop state.
 
-Suggested result table:
+The current default code path usually only prints `actions`; the real action dispatch call is commented out. Only enable execution after confirming that the actions are reasonable.
 
-| Variant     | Head                      | Backbone               | Median latency | Frequency |
-| ----------- | ------------------------- | ---------------------- | -------------- | --------- |
-| baseline    | FlowMatchingHead          | EagleBackbone          | 256 ms         | 3.9 Hz    |
-| accelerated | FlowMatchingInferenceHead | EagleInferenceBackbone | 150-155 ms     | 6.5 Hz    |
+### 6.3 Temporary ROS Master When `roscore` Is Unavailable
+
+Recent debugging found that the current `fluxvla:orin-ros-fa` image can run ROS Python modules, but plain `roscore` is incomplete in some environments:
+
+```text
+ModuleNotFoundError: No module named 'defusedxml'
+RLException: Invalid <param> tag: Cannot load command parameter [rosversion]: no such command [['rosversion', 'roslaunch']].
+```
+
+If you only need to validate the local `rospy` registration flow, start the master directly with `rosmaster`:
+
+```bash
+FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
+  bash -lc 'python3 -m pip install -q defusedxml >/dev/null 2>&1 || true; exec rosmaster --core -p 11311'
+```
+
+The long-term fix belongs in the ROS image layer: add `defusedxml`, and make sure the `rosversion` / `roslaunch` command environment is complete so plain `roscore` works directly.
 
 ## 7. Issues and Troubleshooting Notes
 

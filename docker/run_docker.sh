@@ -9,7 +9,16 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 IMAGE="${FLUXVLA_IMAGE:-fluxvla:orin-ros-fa}"
 ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-flash_attention_2}"
 TRANSFORMERS_ATTN_IMPLEMENTATION="${TRANSFORMERS_ATTN_IMPLEMENTATION:-${ATTN_IMPLEMENTATION}}"
-ROBOTIQ_PY_PKG="${ROBOTIQ_PY_PKG:-${HOME}/sober/robotiq_pkg/robotiq}"
+ROBOTIQ_PY_PKG="${ROBOTIQ_PY_PKG:-}"
+if [ -z "${ROBOTIQ_PY_PKG}" ]; then
+    for candidate in \
+        "${HOME}/robotiq_pkg/robotiq"; do
+        if [ -d "${candidate}" ]; then
+            ROBOTIQ_PY_PKG="${candidate}"
+            break
+        fi
+    done
+fi
 
 DOCKER_ENV_ARGS=(
     -e PYTHONPATH=/workspace/FluxVLA
@@ -33,10 +42,14 @@ DOCKER_VOLUME_ARGS=(
     -v /mnt/nvme:/mnt/nvme
 )
 
-if [ -d "${ROBOTIQ_PY_PKG}" ]; then
-    DOCKER_VOLUME_ARGS+=(
-        -v "${ROBOTIQ_PY_PKG}:/opt/ros/noetic/lib/python3/dist-packages/robotiq:ro"
-    )
+if [ -n "${ROBOTIQ_PY_PKG}" ]; then
+    if [ -d "${ROBOTIQ_PY_PKG}" ]; then
+        DOCKER_VOLUME_ARGS+=(
+            -v "${ROBOTIQ_PY_PKG}:/opt/ros/noetic/lib/python3/dist-packages/robotiq:ro"
+        )
+    else
+        echo "Warning: ROBOTIQ_PY_PKG=${ROBOTIQ_PY_PKG} does not exist; skipping robotiq mount" >&2
+    fi
 fi
 
 if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "^${IMAGE}$"; then
