@@ -211,14 +211,14 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
 
 `docker/run_docker.sh` fills in runtime arguments, environment variables, and common mounts:
 
-| Category                       | Automatic handling                                                                                                                 |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Docker runtime args            | `--runtime=nvidia`, `--network=host`, `--ipc=host`, `--shm-size=16g`                                                               |
-| Python / inference environment | `PYTHONPATH=/workspace/FluxVLA`, `WANDB_MODE=disabled`                                                                             |
-| Attention configuration        | `ATTN_IMPLEMENTATION` defaults to `flash_attention_2`; `TRANSFORMERS_ATTN_IMPLEMENTATION` follows `ATTN_IMPLEMENTATION` by default |
-| Directory mounts               | Repository root mounted to `/workspace/FluxVLA`                                                                                    |
-| Robotiq message package        | Auto-detects `~/robotiq_pkg/robotiq`; override with `ROBOTIQ_PY_PKG=/path/to/robotiq`. It is mounted read-only to `/opt/ros/noetic/lib/python3/dist-packages/robotiq`                  |
-| ROS network variables          | If the host has `ROS_MASTER_URI`, `ROS_IP`, or `ROS_HOSTNAME`, they are passed through to the container                            |
+| Category                       | Automatic handling                                                                                                                                                    |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docker runtime args            | `--runtime=nvidia`, `--network=host`, `--ipc=host`, `--shm-size=16g`                                                                                                  |
+| Python / inference environment | `PYTHONPATH=/workspace/FluxVLA`, `WANDB_MODE=disabled`                                                                                                                |
+| Attention configuration        | `ATTN_IMPLEMENTATION` defaults to `flash_attention_2`; `TRANSFORMERS_ATTN_IMPLEMENTATION` follows `ATTN_IMPLEMENTATION` by default                                    |
+| Directory mounts               | Repository root mounted to `/workspace/FluxVLA`                                                                                                                       |
+| Robotiq message package        | Auto-detects `~/robotiq_pkg/robotiq`; override with `ROBOTIQ_PY_PKG=/path/to/robotiq`. It is mounted read-only to `/opt/ros/noetic/lib/python3/dist-packages/robotiq` |
+| ROS network variables          | If the host has `ROS_MASTER_URI`, `ROS_IP`, or `ROS_HOSTNAME`, they are passed through to the container                                                               |
 
 Temporarily fall back to eager attention:
 

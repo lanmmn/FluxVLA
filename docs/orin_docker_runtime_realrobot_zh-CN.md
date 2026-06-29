@@ -82,7 +82,7 @@ sudo apt update
 sudo apt install -y rsync
 sudo systemctl stop docker
 sudo mkdir -p /mnt/nvme/docker
-# sudo apt install rsync 
+# sudo apt install rsync
 sudo rsync -aHAX /var/lib/docker/ /mnt/nvme/docker/
 
 sudo mkdir -p /etc/docker
@@ -211,14 +211,14 @@ FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
 
 `docker/run_docker.sh` 会统一补齐运行参数、环境变量和常用挂载：
 
-| 类别              | 自动处理内容                                                                                              |
-| ----------------- | --------------------------------------------------------------------------------------------------------- |
-| Docker 运行参数   | --runtime=nvidia、--network=host、--ipc=host、--shm-size=16g                                              |
-| Python / 推理环境 | PYTHONPATH=/workspace/FluxVLA、WANDB_MODE=disabled                                                        |
-| Attention 配置    | ATTN_IMPLEMENTATION 默认 flash_attention_2；TRANSFORMERS_ATTN_IMPLEMENTATION 默认跟随 ATTN_IMPLEMENTATION |
-| 目录挂载          | 仓库根目录挂到 /workspace/FluxVLA；                                                                       |
+| 类别              | 自动处理内容                                                                                                                                 |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docker 运行参数   | --runtime=nvidia、--network=host、--ipc=host、--shm-size=16g                                                                                 |
+| Python / 推理环境 | PYTHONPATH=/workspace/FluxVLA、WANDB_MODE=disabled                                                                                           |
+| Attention 配置    | ATTN_IMPLEMENTATION 默认 flash_attention_2；TRANSFORMERS_ATTN_IMPLEMENTATION 默认跟随 ATTN_IMPLEMENTATION                                    |
+| 目录挂载          | 仓库根目录挂到 /workspace/FluxVLA；                                                                                                          |
 | Robotiq 消息包    | 自动探测 `~/robotiq_pkg/robotiq`；也可用 `ROBOTIQ_PY_PKG=/path/to/robotiq` 指定，挂到 `/opt/ros/noetic/lib/python3/dist-packages/robotiq:ro` |
-| ROS 网络变量      | 若宿主机设置了 ROS_MASTER_URI、ROS_IP 或 ROS_HOSTNAME，自动透传到容器                                     |
+| ROS 网络变量      | 若宿主机设置了 ROS_MASTER_URI、ROS_IP 或 ROS_HOSTNAME，自动透传到容器                                                                        |
 
 临时回退 eager attention：
 
