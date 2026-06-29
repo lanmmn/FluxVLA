@@ -85,3 +85,7 @@ FluxBisim/
 
 # Local Docker wheelhouse staging
 docker/.wheelhouse/
+
+# Local Orin real-robot runtime notes
+docs/orin_docker_runtime_realrobot.md
+docs/orin_docker_runtime_realrobot_zh-CN.md
