@@ -211,8 +211,6 @@ inference = dict(
     ...)
 ```
 
-\<\<\<\<\<\<\< HEAD
-
 ### GR00T-RTC Example
 
 GR00T-RTC uses the existing GR00T acceleration path (`EagleInferenceBackbone` + `FlowMatchingInferenceHead`) and adds RTC at the runner/head boundary. The RTC runner resamples the remaining part of the previously predicted action chunk, passes it as `prev_actions` with `prefix_len`, and the accelerated head fills CUDA Graph prefix buffers before replay.
@@ -288,40 +286,6 @@ Notes:
 - Accelerated GR00T RTC currently supports `rtc_config.method='prefix'`.
 - `prefix_len` should be chosen from deployment latency and control frequency, and clamped by the runner to the remaining previous chunk length.
 - Keep `cfg.inference_model` on the accelerated classes; using `cfg.model` or `FlowMatchingHead` will run RTC but will not use the GR00T CUDA Graph/Triton acceleration path.
-  \=======
-
-## Profiling And Graph Reuse
-
-Several optional environment variables help locate remaining host-side and CUDA Graph boundary overheads without changing default runtime behavior:
-
-```bash
-# ZMQ serving path: decode / dataset preprocess / H2D / model / serialize timings.
-FLUXVLA_SERVING_PROFILE=1 FLUXVLA_SERVING_PROFILE_INTERVAL=20 \
-    python -m fluxvla.engines.runners.serving.serve --config <config> --ckpt-path <ckpt>
-
-# GR00T path: EagleInferenceBackbone vs FlowMatchingInferenceHead CUDA timing.
-FLUXVLA_PROFILE_PREDICT_ACTION=1 python scripts/test_gr00t_with_embodiment.py ...
-
-# PI0.5 path: host prep, buffer copy, CUDA Graph replay, and graph cache status.
-FLUXVLA_PI05_PROFILE=1 FLUXVLA_PI05_PROFILE_INTERVAL=20 python scripts/test_pi05_dummy_forward.py ...
-```
-
-For PI0.5 with `FLUXVLA_PI05_FA2=1`, prompt length changes alter the active encoder length and normally require a new CUDA Graph capture. FluxVLA keeps a small per-length graph cache so repeated prompt lengths can reuse previously captured graphs:
-
-```bash
-# Default cache size is 4. Set to 0 to disable, or increase if prompts use more fixed lengths.
-FLUXVLA_PI05_GRAPH_CACHE_SIZE=8 FLUXVLA_PI05_FA2=1 python scripts/test_pi05_dummy_forward.py ...
-```
-
-The cache is exact-length based. It does not pad prompts to a bucketed length, because FlashRT FA2 currently attends over the full provided K/V length without a padding mask.
-
-To profile whether FlashRT FA2 attention still dominates PI0.5, run the phase profiler. When FA2 is enabled, it reports cumulative encoder/decoder attention time and call counts in addition to the existing vision / encoder / decoder phase timings:
-
-```bash
-FLUXVLA_PI05_FA2=1 python scripts/profile_pi05_phases.py
-```
-
-> > > > > > > 722f05a (feat: add Fluxvla Orin support and inference benchmarks)
 
 ## Benchmarks
 
