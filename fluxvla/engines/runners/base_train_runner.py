@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import contextlib
 import gc
 import inspect
 import math
@@ -25,7 +24,6 @@ from typing import Dict, Optional
 import torch
 import torch.distributed as dist
 from safetensors.torch import save_file
-from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers.modeling_outputs import CausalLMOutputWithPast
@@ -33,10 +31,8 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from fluxvla.engines.utils import check_bloat16_supported
 from fluxvla.engines.utils.name_map import str_to_dtype
 from fluxvla.engines.utils.torch_utils import worker_init_function
-from fluxvla.optimizers.schedulers import (get_constant_schedule,
-                                           get_cosine_schedule_with_warmup,
-                                           get_step_based_schedule)
-from ..utils import build_tokenizer_from_cfg, initialize_overwatch
+from ..utils import (build_lr_scheduler_from_cfg, build_tokenizer_from_cfg,
+                     initialize_overwatch)
 
 overwatch = initialize_overwatch(__name__)
 
@@ -60,10 +56,8 @@ class BaseTrainRunner(ABC):
             based on epochs. Defaults to 10000.
         max_keep_ckpts (int, optional): Maximum number of checkpoints to keep.
             Defaults to 2.
-        lr_scheduler_type (str, optional): Type of learning rate scheduler.
-            Defaults to 'constant'.
-        warmup_ratio (int, optional): Warm-up ratio for learning rate
-            scheduler. Defaults to 0.
+        lr_scheduler (Dict): Learning rate scheduler policy configuration.
+        betas (tuple, optional): AdamW beta values. Defaults to (0.9, 0.999).
         enable_gradient_checkpointing (bool, optional): Enable gradient
             checkpointing. Defaults to True.
         enable_mixed_precision_training (bool, optional): Enable mixed
@@ -88,28 +82,18 @@ class BaseTrainRunner(ABC):
                  save_epoch_interval: int = 1,
                  save_iter_interval: int = 10000,
                  max_keep_ckpts: int = 2,
-                 lr_scheduler_type: str = 'constant',
-                 lr_schedule: Optional[Dict[float, float]] = None,
-                 warmup_ratio: int = 0,
+                 lr_scheduler: Dict = None,
+                 betas: tuple = (0.9, 0.999),
                  enable_gradient_checkpointing: bool = True,
                  enable_mixed_precision_training: bool = True,
                  reduce_in_full_precision: bool = True,
                  mixed_precision_dtype: str = 'bf16',
-                 grad_accumulation_steps: int = 1,
-                 evaluator: Optional[Dict] = None,
                  tokenizer: Optional[Dict] = None,
                  resume_from: Optional[str] = None):
         from ..utils.builder import (build_collator_from_cfg,
-                                     build_evaluator_from_cfg,
                                      build_metric_from_cfg, build_vla_from_cfg)
 
-        grad_accumulation_steps = int(grad_accumulation_steps)
-        assert grad_accumulation_steps >= 1, \
-            'Gradient accumulation steps must be >= 1!'
-
-        metric = metric.copy()
         metric['hparams'] = cfg
-        metric['grad_accumulation_steps'] = grad_accumulation_steps
         timestamp = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
         metric['run_id'] = (
             f"{os.path.basename(cfg.filename).replace('.py', '')}_{timestamp}")
@@ -143,19 +127,15 @@ class BaseTrainRunner(ABC):
         self.save_iter_interval = save_iter_interval
         self.save_epoch_interval = save_epoch_interval
         self.max_keep_ckpts = max_keep_ckpts
-        self.lr_scheduler_type = lr_scheduler_type
-        self.warmup_ratio = warmup_ratio
+        self.lr_scheduler_cfg = lr_scheduler
+        self.betas = tuple(float(b) for b in betas)
         self.enable_gradient_checkpointing = enable_gradient_checkpointing
         self.enable_mixed_precision_training = enable_mixed_precision_training
         self.reduce_in_full_precision = reduce_in_full_precision
         self.mixed_precision_dtype = str_to_dtype(mixed_precision_dtype)
         self.per_device_batch_size = cfg.train_dataloader.per_device_batch_size
-        self.grad_accumulation_steps = grad_accumulation_steps
-        self.evaluator = (
-            build_evaluator_from_cfg(evaluator)
-            if evaluator is not None else None)
         self.global_batch_size = self.per_device_batch_size * \
-            overwatch.world_size() * self.grad_accumulation_steps
+            overwatch.world_size()
         if hasattr(cfg.train_dataloader, 'per_device_num_workers'):
             self.per_device_num_workers = cfg.train_dataloader.per_device_num_workers  # noqa: E501
         else:
@@ -177,14 +157,16 @@ class BaseTrainRunner(ABC):
         self.resume_from = resume_from
         # Track if optimizer state was successfully loaded
         self.optimizer_state_loaded = False
-        # Store lr_schedule for step-based scheduler
-        self.lr_schedule = lr_schedule
+        self.weight_decay = None
+        self.num_training_steps = None
         self._active_dataloader = None
 
         # Lightweight Validation
         assert (
             self.global_batch_size % self.per_device_batch_size == 0
         ), 'Per-device batch size must evenly divide global batch size!'
+        self.grad_accumulation_steps = self.global_batch_size // self.per_device_batch_size // overwatch.world_size(  # noqa: E501
+        )
 
         if self.enable_mixed_precision_training:
             assert self.mixed_precision_dtype == torch.bfloat16, \
@@ -467,6 +449,16 @@ class BaseTrainRunner(ABC):
             return math.ceil(dataset_len / self.global_batch_size)
 
     @staticmethod
+    def _build_dataloader_generator() -> Optional[torch.Generator]:
+        seed = os.environ.get('EXPERIMENT_GLOBAL_SEED')
+        if seed is None:
+            return None
+
+        generator = torch.Generator()
+        generator.manual_seed(int(seed) + overwatch.rank())
+        return generator
+
+    @staticmethod
     def _tensor_for_safetensors(tensor):
         """Return a contiguous tensor for safetensors export."""
         if isinstance(tensor, torch.Tensor) and not tensor.is_contiguous():
@@ -513,161 +505,42 @@ class BaseTrainRunner(ABC):
                     overwatch.warning(
                         f'Failed to remove checkpoint {old_ckpt}: {e}')
 
+    def _resolve_lr_scheduler_cfg(self) -> Dict:
+        if self.lr_scheduler_cfg is None:
+            raise ValueError('runner.lr_scheduler must be provided.')
+        return dict(self.lr_scheduler_cfg)
+
     def _setup_optimizer_and_scheduler(
         self,
         n_train_examples: int,
         weight_decay: Optional[float] = None,
-        lr_schedule: Optional[Dict[float, float]] = None,
     ) -> None:
-        """Setup optimizer and learning rate scheduler.
-
-        This method handles the creation of optimizer and scheduler based on
-        the configured lr_scheduler_type. It supports parameter grouping
-        with weight decay when weight_decay is provided.
-
-        Args:
-            n_train_examples: Number of training examples.
-            weight_decay: Weight decay value for optimizer. If provided, will
-                create parameter groups (decay/no_decay). If None, uses
-                simple parameter list.
-            lr_schedule: Dictionary mapping ratio (0-1) to learning rate for
-                step-based scheduler. Required when lr_scheduler_type is
-                'step-based'.
-        """
-        # Calculate number of training steps
+        """Setup optimizer and learning rate scheduler policy."""
+        self.weight_decay = weight_decay
         n_train_examples = math.ceil(
             n_train_examples / self.global_batch_size) * self.global_batch_size
         if self.max_steps is None:
-            num_training_steps = (n_train_examples *
-                                  self.max_epochs) // self.global_batch_size
+            self.num_training_steps = (
+                n_train_examples * self.max_epochs) // self.global_batch_size
         else:
-            num_training_steps = self.max_steps
+            self.num_training_steps = self.max_steps
 
-        if self.lr_scheduler_type == 'linear-warmup+cosine-decay':
-            # Set warm-up steps (floor) based on `warmup_ratio`
-            # (should be 0.03 - 0.05)
-            num_warmup_steps = int(num_training_steps * self.warmup_ratio)
+        scheduler_cfg = self._resolve_lr_scheduler_cfg()
+        self.lr_scheduler = build_lr_scheduler_from_cfg(scheduler_cfg)
+        self.lr_scheduler_policy_type = scheduler_cfg['type']
+        self.optimizer, self.lr_scheduler = self.lr_scheduler.build(
+            self, weight_decay)
 
-            # Create Parameter Groups --> bias terms, normalization
-            # layer parameters shouldn't be decayed!
-            if weight_decay is not None:
-                decay, no_decay = [], []
-                for name, param in self.vla.named_parameters():
-                    if not param.requires_grad:
-                        continue
+    def _get_log_lr(self) -> float:
+        if hasattr(self.lr_scheduler, 'get_log_lr'):
+            return self.lr_scheduler.get_log_lr(self)
+        return self.lr_scheduler.get_last_lr()[0]
 
-                    # Check on any parameters with fewer than 2 dimensions
-                    # or with "bias" in the name
-                    if param.ndim <= 1 or name.endswith('.bias'):
-                        no_decay.append(param)
-                    else:
-                        decay.append(param)
-
-                # Build Parameter Groups
-                groups = [{
-                    'params': decay,
-                    'weight_decay': weight_decay
-                }, {
-                    'params': no_decay,
-                    'weight_decay': 0.0
-                }]
-            else:
-                # Simple parameter list
-                groups = [
-                    param for param in self.vla.parameters()
-                    if param.requires_grad
-                ]
-
-            # Create Optimizer & LR Scheduler
-            self.optimizer = AdamW(groups, lr=self.learning_rate)
-            self.lr_scheduler = get_cosine_schedule_with_warmup(
-                self.optimizer, num_warmup_steps, num_training_steps)
-            for param_group in self.optimizer.param_groups:
-                param_group['lr'] = 0.0
-
-        elif self.lr_scheduler_type == 'constant':
-            # Create Parameter Groups --> bias terms, normalization
-            # layer parameters shouldn't be decayed!
-            if weight_decay is not None:
-                decay, no_decay = [], []
-                for name, param in self.vla.named_parameters():
-                    if not param.requires_grad:
-                        continue
-
-                    # Check on any parameters with fewer than 2 dimensions
-                    # or with "bias" in the name
-                    if param.ndim <= 1 or name.endswith('.bias'):
-                        no_decay.append(param)
-                    else:
-                        decay.append(param)
-
-                # Build Parameter Groups
-                groups = [{
-                    'params': decay,
-                    'weight_decay': weight_decay
-                }, {
-                    'params': no_decay,
-                    'weight_decay': 0.0
-                }]
-            else:
-                # Simple parameter list
-                groups = [
-                    param for param in self.vla.parameters()
-                    if param.requires_grad
-                ]
-
-            # Create Optimizer & LR Scheduler
-            self.optimizer = AdamW(groups, lr=self.learning_rate)
-            self.lr_scheduler = get_constant_schedule(self.optimizer)
-
-        elif self.lr_scheduler_type == 'step-based':
-            if lr_schedule is None:
-                raise ValueError('lr_schedule must be provided when using '
-                                 'step-based scheduler')
-
-            # Create Parameter Groups --> bias terms, normalization
-            # layer parameters shouldn't be decayed!
-            if weight_decay is not None:
-                decay, no_decay = [], []
-                for name, param in self.vla.named_parameters():
-                    if not param.requires_grad:
-                        continue
-
-                    # Check on any parameters with fewer than 2 dimensions
-                    # or with "bias" in the name
-                    if param.ndim <= 1 or name.endswith('.bias'):
-                        no_decay.append(param)
-                    else:
-                        decay.append(param)
-
-                # Build Parameter Groups
-                groups = [{
-                    'params': decay,
-                    'weight_decay': weight_decay
-                }, {
-                    'params': no_decay,
-                    'weight_decay': 0.0
-                }]
-            else:
-                # Simple parameter list
-                groups = [
-                    param for param in self.vla.parameters()
-                    if param.requires_grad
-                ]
-
-            # Create Optimizer & Step-based LR Scheduler
-            self.optimizer = AdamW(groups, lr=self.learning_rate)
-            self.lr_scheduler = get_step_based_schedule(
-                self.optimizer, num_training_steps, lr_schedule)
-
-        else:
-            raise ValueError(f'Learning Rate Schedule with type '
-                             f"'{self.lr_scheduler_type}' is not supported!")
-
-    def run(self, vla_dataset, eval_dataset=None) -> None:
+    def run(self, vla_dataset) -> None:
         """Train the VLA model."""
-        training_eval_dataset = (
-            vla_dataset if eval_dataset is None else eval_dataset)
+        assert self.grad_accumulation_steps == 1, \
+            'VLA training does not support gradient accumulation!'
+
         # Setup dataloader
         sampler = torch.utils.data.distributed.DistributedSampler(
             vla_dataset,
@@ -684,6 +557,7 @@ class BaseTrainRunner(ABC):
             collate_fn=self.collator,
             num_workers=self.per_device_num_workers,
             worker_init_fn=worker_init_function,
+            generator=self._build_dataloader_generator(),
             pin_memory=True,
             prefetch_factor=2 if use_workers else None,
             persistent_workers=use_workers)
@@ -700,67 +574,15 @@ class BaseTrainRunner(ABC):
 
         try:
             if self.training_mode == 'step_based':
-                return self._run_step_based(dataloader, sampler,
-                                            training_eval_dataset)
+                return self._run_step_based(dataloader, sampler)
             else:
-                return self._run_epoch_based(dataloader, sampler,
-                                             training_eval_dataset)
+                return self._run_epoch_based(dataloader, sampler)
         finally:
             self._shutdown_dataloader(self._active_dataloader)
             self._active_dataloader = None
             gc.collect()
 
-    def _next_batch(self, dataloader, dataloader_iter, sampler):
-        """Fetch a micro-batch, restarting the epoch if the iterator ends."""
-        while True:
-            if dataloader_iter is None:
-                if sampler:
-                    sampler.set_epoch(self.current_epoch)
-                dataloader_iter = iter(dataloader)
-
-            try:
-                return next(dataloader_iter), dataloader_iter
-            except StopIteration:
-                self.current_epoch += 1
-                dataloader_iter = None
-
-    def _run_accumulated_training_step(self, dataloader, dataloader_iter,
-                                       sampler):
-        """Run one optimizer step made of one or more micro-batches."""
-        losses = []
-        for micro_step in range(self.grad_accumulation_steps):
-            batch, dataloader_iter = self._next_batch(dataloader,
-                                                      dataloader_iter, sampler)
-            should_step = micro_step == self.grad_accumulation_steps - 1
-            # Skip the DDP/FSDP gradient all-reduce on non-final
-            # micro-steps; gradients are synchronized only once when the
-            # accumulated optimizer step is taken.
-            with self._grad_sync_context(should_sync=should_step):
-                loss = self._training_step(batch, should_step=should_step)
-            losses.append(loss.detach())
-        mean_loss = torch.stack(losses).mean()
-        return float(mean_loss.item()), dataloader_iter
-
-    def _grad_sync_context(self, should_sync: bool):
-        """Return the gradient synchronization context for a micro-step.
-
-        For DDP/FSDP-wrapped models, ``no_sync()`` suppresses the gradient
-        all-reduce during ``backward``. We only need to synchronize on the
-        last micro-step of a gradient-accumulation window, which cuts the
-        gradient communication volume by a factor of
-        ``grad_accumulation_steps``. Falls back to a no-op context for the
-        final micro-step, single-GPU runs, or any model lacking
-        ``no_sync``.
-        """
-        if should_sync:
-            return contextlib.nullcontext()
-        no_sync = getattr(self.vla, 'no_sync', None)
-        if callable(no_sync):
-            return no_sync()
-        return contextlib.nullcontext()
-
-    def _run_step_based(self, dataloader, sampler,
-                        training_eval_dataset) -> str:
+    def _run_step_based(self, dataloader, sampler) -> str:
         """Step-based training loop. Handles infinite dataloaders."""
         with tqdm(
                 total=self.max_steps,
@@ -773,21 +595,35 @@ class BaseTrainRunner(ABC):
             epoch_step_count = 0
 
             while self.metric.global_step < self.max_steps:
-                loss, dataloader_iter = self._run_accumulated_training_step(
-                    dataloader, dataloader_iter, sampler)
-                self._loss_accumulator.append(loss)
+                # Init/reset iterator at epoch start
+                if dataloader_iter is None:
+                    if sampler:
+                        sampler.set_epoch(self.current_epoch)
+                    dataloader_iter = iter(dataloader)
+                    epoch_step_count = 0
+
+                # Get next batch
+                try:
+
+                    batch = next(dataloader_iter)
+                except StopIteration:
+                    # Finite dataloader exhausted, start new epoch
+                    self.current_epoch += 1
+                    dataloader_iter = None
+                    continue
+
+                loss = self._training_step(batch)
+                self._loss_accumulator.append(
+                    float(loss.detach().cpu().numpy().copy()))
                 epoch_step_count += 1
 
                 # Update metrics
                 self.metric.commit(
                     global_step=self.metric.global_step + 1,
                     epoch=self.current_epoch,
-                    lr=self.lr_scheduler.get_last_lr()[0])
+                    lr=self._get_log_lr())
                 progress.set_description(self.metric.push(), refresh=False)
                 progress.update()
-                if (self.evaluator is not None
-                        and self.evaluator.should_run(self)):
-                    self.evaluator.run(self, training_eval_dataset)
 
                 # Save checkpoint
                 if self._should_save_step_checkpoint():
@@ -801,8 +637,7 @@ class BaseTrainRunner(ABC):
 
         return self._get_checkpoint_path()
 
-    def _run_epoch_based(self, dataloader, sampler,
-                         training_eval_dataset) -> str:
+    def _run_epoch_based(self, dataloader, sampler) -> str:
         """Epoch-based training with nested progress bars. Handles
             infinite dataloaders.
 
@@ -835,22 +670,25 @@ class BaseTrainRunner(ABC):
                         disable=not overwatch.is_rank_zero()) as iter_pbar:
 
                     while True:
-                        loss, dataloader_iter = \
-                            self._run_accumulated_training_step(
-                                dataloader, dataloader_iter, sampler)
-                        self._loss_accumulator.append(loss)
+                        # Get next batch
+                        try:
+                            batch = next(dataloader_iter)
+                        except StopIteration:
+                            # Finite dataloader exhausted
+                            break
+
+                        loss = self._training_step(batch)
+                        self._loss_accumulator.append(
+                            float(loss.detach().cpu().numpy().copy()))
                         epoch_step_count += 1
 
                         # Update metrics
                         self.metric.commit(
                             global_step=self.metric.global_step + 1,
                             epoch=self.current_epoch,
-                            lr=self.lr_scheduler.get_last_lr()[0])
+                            lr=self._get_log_lr())
                         iter_pbar.set_description(self.metric.push())
                         iter_pbar.update()
-                        if (self.evaluator is not None
-                                and self.evaluator.should_run(self)):
-                            self.evaluator.run(self, training_eval_dataset)
 
                         # For infinite dataloaders: end epoch by step count
                         if (self.steps_per_epoch
@@ -886,8 +724,7 @@ class BaseTrainRunner(ABC):
             f'Training: mode={self.training_mode}, epochs={self.max_epochs}, '
             f'steps/epoch={self.steps_per_epoch}, '
             f'batch={self.global_batch_size} '
-            f'({self.per_device_batch_size}x{overwatch.world_size()}'
-            f'x{self.grad_accumulation_steps})')
+            f'({self.per_device_batch_size}x{overwatch.world_size()})')
 
     def _vla_accepts_kwarg(self, key: str) -> bool:
         """Return whether the wrapped VLA forward accepts ``key``."""
@@ -904,25 +741,9 @@ class BaseTrainRunner(ABC):
         self._vla_accepts_kwarg_cache = cache
         return accepts
 
-    @staticmethod
-    def _collect_output_loss_metrics(output) -> Dict[str, torch.Tensor]:
-        """Collect scalar loss components returned by a VLA forward pass."""
-        if not hasattr(output, 'items'):
-            return {}
-
-        metrics = {}
-        reserved_keys = {'loss'}
-        for key, value in output.items():
-            if key in reserved_keys:
-                continue
-            if not (key.startswith('loss_') or key.endswith('_loss')):
-                continue
-            if isinstance(value, torch.Tensor) and value.numel() == 1:
-                metrics[key] = value
-        return metrics
-
-    def _training_step(self, batch, should_step: bool = True) -> torch.Tensor:
+    def _training_step(self, batch) -> torch.Tensor:
         """Execute single training step: forward, backward, optimize."""
+        self.lr_scheduler.prepare_step(self)
         batch = self._prepare_batch(
             batch, self.device_id, self.mixed_precision_dtype
             if self.enable_mixed_precision_training else None)
@@ -936,10 +757,9 @@ class BaseTrainRunner(ABC):
                 enabled=self.enable_mixed_precision_training):
             output: CausalLMOutputWithPast = self.vla(**batch)
             loss = output['loss']
-            loss_metrics = self._collect_output_loss_metrics(output)
 
-        self.metric.commit(loss=loss, **loss_metrics)
-        (loss / self.grad_accumulation_steps).backward()
+        self.metric.commit(loss=loss)
+        loss.backward()
 
         # Commit per-dataset metrics
         if overwatch.is_rank_zero() and all(k in output for k in [
@@ -951,9 +771,6 @@ class BaseTrainRunner(ABC):
                 self.metric.commit_for_dataset(
                     dataset_name=ds.decode(), action_accuracy=acc, l1_loss=l1)
 
-        if not should_step:
-            return loss.detach()
-
         # Gradient step with fallback on optimizer state mismatch
         self.clip_grad_norm()
         try:
@@ -964,14 +781,14 @@ class BaseTrainRunner(ABC):
                 self.optimizer.step()
             else:
                 raise
-        self.lr_scheduler.step()
+        self.lr_scheduler.step(self)
         self.optimizer.zero_grad()
 
         # Custom hook for subclasses
         if hasattr(self, '_custom_training_step'):
             custom_loss = self._custom_training_step(batch, output, loss)
             if custom_loss is not None:
-                loss = loss.detach().new_tensor(custom_loss)
+                loss = torch.tensor(custom_loss)
 
         return loss
 
@@ -979,14 +796,14 @@ class BaseTrainRunner(ABC):
         """Reinitialize optimizer on state mismatch."""
         if overwatch.is_rank_zero():
             overwatch.warning('Optimizer state mismatch. Reinitializing.')
-        trainable_params = [
-            p for p in self.vla.parameters() if p.requires_grad
-        ]
-        current_lr = self.optimizer.param_groups[0]['lr']
-        self.optimizer = torch.optim.AdamW(trainable_params, lr=current_lr)
+        last_lrs = self.lr_scheduler.get_last_lr()
+        self.optimizer = self.lr_scheduler.build_optimizer(
+            self, self.weight_decay)
+        for group, lr in zip(self.optimizer.param_groups, last_lrs):
+            group['lr'] = lr
+        self.lr_scheduler.bind_optimizer(self.optimizer)
+        self.lr_scheduler.prepare_step(self)
         self.optimizer_state_loaded = False
-        if self.lr_scheduler and hasattr(self.lr_scheduler, 'optimizer'):
-            self.lr_scheduler.optimizer = self.optimizer
 
     def _save_and_sync(self, loss_value: float = None):
         """Save checkpoint and synchronize.

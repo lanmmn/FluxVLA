@@ -13,24 +13,16 @@
 # limitations under the License.
 
 import math
-from functools import partial
 from typing import Callable, Dict, List, Optional, Union
 
 import torch
 import torch.nn.functional as F
-
-try:
-    from torch.distributed.fsdp.wrap import _or_policy
-except ModuleNotFoundError as exc:
-    _or_policy = None
-    _FSDP_WRAP_IMPORT_ERROR = exc
-else:
-    _FSDP_WRAP_IMPORT_ERROR = None
 from transformers.cache_utils import Cache
 
 from fluxvla.engines import (VLAS, build_llm_backbone_from_cfg,
                              build_projector_from_cfg)
 from fluxvla.engines.losses import reduce_action_bc_loss
+from fluxvla.engines.utils.fsdp_wrap import or_policy
 from fluxvla.engines.utils.model_utils import (apply_rotary_pos_emb,
                                                create_sinusoidal_pos_embedding,
                                                eager_attention_forward,
@@ -852,10 +844,6 @@ class PI0FlowMatching(BaseVLA):
         and combines with VLM's existing policy. It explicitly avoids wrapping
         nn.Embedding to prevent errors during sharding.
         """
-        if _FSDP_WRAP_IMPORT_ERROR is not None:
-            raise RuntimeError(
-                'FSDP wrapping policies are unavailable in this torch build'
-            ) from _FSDP_WRAP_IMPORT_ERROR
         wrapping_policies = []
         if self.vlm_backbone is not None:
             vlm_wrapping_policy = self.vlm_backbone.get_fsdp_wrapping_policy()
@@ -880,10 +868,4 @@ class PI0FlowMatching(BaseVLA):
                 return True
             return False
 
-        return partial(
-            _or_policy,
-            policies=[
-                *wrapping_policies,
-                match_module,
-            ],
-        )
+        return or_policy([*wrapping_policies, match_module])

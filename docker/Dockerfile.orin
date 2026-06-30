@@ -73,7 +73,7 @@ RUN wget -q https://developer.download.nvidia.com/compute/cusparselt/redist/libc
     BUILD_VERSION=0.20.0 python3 -m pip install --no-build-isolation --no-deps . && \
     cd /workspace && rm -rf /tmp/vision /tmp/vision.tar.gz
 
-COPY requirements_orin_notorch.txt constraints_orin.txt /workspace/
+COPY docker/orin/requirements_orin_notorch.txt docker/orin/constraints_orin.txt /workspace/
 COPY vendor/dlimp /workspace/vendor/dlimp
 RUN pip3 install triton==3.5.1 && \
     pip3 install --no-deps -e /workspace/vendor/dlimp && \
@@ -190,7 +190,7 @@ LABEL org.opencontainers.image.title="FluxVLA Orin ROS" \
 
 ENV FLUXVLA_INSTALL_ROS=1
 
-COPY patch_rosconsole.py /tmp/patch_rosconsole.py
+COPY docker/orin/patch_rosconsole.py /tmp/patch_rosconsole.py
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -265,7 +265,7 @@ for name in mods:
   print(f'{name}: {getattr(mod, "__version__", "ok")}')
 PY
 
-COPY ros_entrypoint.sh /ros_entrypoint.sh
+COPY docker/orin/ros_entrypoint.sh /ros_entrypoint.sh
 RUN chmod +x /ros_entrypoint.sh
 
 ENTRYPOINT ["/ros_entrypoint.sh"]
@@ -326,7 +326,7 @@ from cv_bridge.boost.cv_bridge_boost import getCvType
 print(f'cv_bridge boost rgb8: {getCvType("rgb8")}')
 PY
 
-COPY ros_entrypoint.sh /ros_entrypoint.sh
+COPY docker/orin/ros_entrypoint.sh /ros_entrypoint.sh
 RUN chmod +x /ros_entrypoint.sh
 
 ENTRYPOINT ["/ros_entrypoint.sh"]

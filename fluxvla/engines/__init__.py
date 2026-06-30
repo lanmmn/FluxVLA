@@ -15,6 +15,8 @@
 from .utils import *  # noqa: F401, F403
 
 
+# Import fallback for Orin/inference Docker environments where
+# PyTorch may be built without distributed support.
 def _is_optional_torch_distributed_error(exc: ModuleNotFoundError) -> bool:
     name = getattr(exc, 'name', '') or ''
     return name.startswith('torch.distributed') or name.startswith(
