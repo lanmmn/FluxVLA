@@ -12,18 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from functools import partial
 from typing import Callable, Dict, Optional, Type, Union
 
 import torch
 import torch.nn as nn
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from transformers.models.qwen3_vl.modeling_qwen3_vl import \
     Qwen3VLTextDecoderLayer
 
 from fluxvla.engines import VLM_BACKBONES
+from fluxvla.engines.utils.fsdp_wrap import transformer_wrap_policy
 from fluxvla.engines.utils.name_map import str_to_dtype
-from .hf_vlm import VLMBackbone
+from .hf_vlm import VLMBackbone, validate_attn_implementation
 
 
 @VLM_BACKBONES.register_module()
@@ -63,6 +62,7 @@ class Qwen3VL(VLMBackbone):
                  projection_mlp_hidden_dim: Optional[int] = None,
                  attn_implementation: str = 'flash_attention_2',
                  torch_dtype: Union[torch.dtype, str] = 'bf16') -> None:
+        attn_implementation = validate_attn_implementation(attn_implementation)
         self._attn_implementation = attn_implementation
         assert torch_dtype is not None, 'torch_dtype must be specified'
         if isinstance(torch_dtype, str):
@@ -316,7 +316,4 @@ class Qwen3VL(VLMBackbone):
 
     def get_fsdp_wrapping_policy(self) -> Callable:
         """Return FSDP wrapping policy for Qwen3VLTextDecoderLayer."""
-        transformer_block_policy = partial(
-            transformer_auto_wrap_policy,
-            transformer_layer_cls={Qwen3VLTextDecoderLayer})
-        return transformer_block_policy
+        return transformer_wrap_policy({Qwen3VLTextDecoderLayer})

@@ -117,7 +117,7 @@ class Eagle2_5_VLForConditionalGeneration(Eagle2_5_VLPreTrainedModel,
             self.vision_model = vision_model
         else:
             if config.vision_config.model_type == 'siglip_vision_model':
-                config.vision_config._attn_implementation = 'eager'
+                config.vision_config._attn_implementation = 'flash_attention_2'
                 self.vision_model = SiglipVisionModel(config.vision_config)
             elif config.vision_config.model_type == 'radio':
                 self.vision_model = RADIOModel(config.vision_config)
@@ -140,7 +140,6 @@ class Eagle2_5_VLForConditionalGeneration(Eagle2_5_VLPreTrainedModel,
                 ), f'Qwen2 must use flash_attention_2 but got {config.text_config._attn_implementation}'  # noqa: E501
                 self.language_model = Qwen2ForCausalLM(config.text_config)
             elif config.text_config.architectures[0] == 'Qwen3ForCausalLM':
-                config.text_config._attn_implementation = 'eager'
                 self.language_model = Qwen3ForCausalLM(config.text_config)
             else:
                 raise NotImplementedError(

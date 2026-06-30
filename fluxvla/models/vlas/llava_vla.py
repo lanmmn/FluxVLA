@@ -24,27 +24,6 @@ from .open_vla import OpenVLA
 overwatch = initialize_overwatch(__name__)
 
 
-def _debug_tensor_summary(label: str, tensor: torch.Tensor) -> None:
-    if os.environ.get('FLUXVLA_DEBUG_NAN', '0') != '1':
-        return
-    detached = tensor.detach()
-    finite = torch.isfinite(detached)
-    finite_count = int(finite.sum().item())
-    total_count = detached.numel()
-    if finite_count:
-        finite_values = detached[finite].float()
-        min_value = float(finite_values.min().item())
-        max_value = float(finite_values.max().item())
-    else:
-        min_value = float('nan')
-        max_value = float('nan')
-    print(
-        f'[NaNDebug] {label}: tensor shape={tuple(detached.shape)} '
-        f'dtype={detached.dtype} finite={finite_count}/{total_count} '
-        f'min={min_value:.6g} max={max_value:.6g}',
-        flush=True)
-
-
 @VLAS.register_module()
 class LlavaVLA(OpenVLA):
     """
@@ -236,8 +215,6 @@ class LlavaVLA(OpenVLA):
         if profile and torch.cuda.is_available():
             backbone_end.record()
             head_start.record()
-
-        _debug_tensor_summary('llava_vla.last_hidden_state', last_hidden_state)
 
         pred_actions = self.vla_head.predict_action(
             input_features=last_hidden_state,
