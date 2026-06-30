@@ -11,7 +11,6 @@ Usage::
 """
 from __future__ import annotations
 import io
-import os
 import threading
 import time
 from dataclasses import dataclass
@@ -30,15 +29,6 @@ def serialize_actions(actions: torch.Tensor) -> bytes:
     buf = io.BytesIO()
     np.save(buf, actions.cpu().numpy(), allow_pickle=False)
     return buf.getvalue()
-
-
-def _move_tensors_to_device(batch: dict, device: torch.device) -> None:
-    for key, value in batch.items():
-        if not isinstance(value, torch.Tensor):
-            continue
-        if value.device == device:
-            continue
-        batch[key] = value.to(device, non_blocking=True)
 
 
 @dataclass
@@ -222,9 +212,6 @@ def create_server(
     total_requests = 0
     total_infer_time = 0.0
     start_time = time.time()
-    profile_enabled = os.environ.get('FLUXVLA_SERVING_PROFILE', '0') == '1'
-    profile_interval = int(
-        os.environ.get('FLUXVLA_SERVING_PROFILE_INTERVAL', '50'))
 
     def predict_action(obs_data: bytes = None,
                        unnorm_key: str = '',
@@ -232,10 +219,8 @@ def create_server(
                        _wire_format: int = 0) -> dict:
         nonlocal total_requests, total_infer_time
 
-        t_request = time.perf_counter()
         obs = _obs_dict if _obs_dict is not None else \
             ObsSerializer.from_bytes(obs_data)
-        t_decoded = time.perf_counter()
 
         if dataset is not None:
             result = dataset(obs)
@@ -244,25 +229,14 @@ def create_server(
             batch = obs
         if unnorm_key:
             batch['unnorm_key'] = unnorm_key
-        t_preprocessed = time.perf_counter()
 
         t0 = time.perf_counter()
-        model_gpu_ms = None
         with torch.inference_mode(), torch.autocast(
                 'cuda', dtype=mixed_precision_dtype, enabled=True):
-            _move_tensors_to_device(batch, torch_device)
-            t_device_ready = time.perf_counter()
-            if profile_enabled and torch_device.type == 'cuda':
-                start_evt = torch.cuda.Event(enable_timing=True)
-                end_evt = torch.cuda.Event(enable_timing=True)
-                start_evt.record()
-                actions = vla.predict_action(**batch)
-                end_evt.record()
-                end_evt.synchronize()
-                model_gpu_ms = start_evt.elapsed_time(end_evt)
-            else:
-                actions = vla.predict_action(**batch)
-            t_model_returned = time.perf_counter()
+            for k, v in batch.items():
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v.to(torch_device)
+            actions = vla.predict_action(**batch)
         infer_time = time.perf_counter() - t0
 
         if denormalize_action is not None:
@@ -270,17 +244,14 @@ def create_server(
             d = denormalize_action(
                 dict(action=actions_np[0], task_suite_name=task_suite_name))
             actions = torch.from_numpy(d[None].astype(np.float32))
-        t_denormalized = time.perf_counter()
 
         action_bytes = serialize_actions(actions)
-        t_serialized = time.perf_counter()
 
         with lock:
             total_requests += 1
             total_infer_time += infer_time
             n = total_requests
             should_print = (n % 50 == 0)
-            should_profile = profile_enabled and (n % profile_interval == 0)
             avg = total_infer_time / n if should_print else 0.0
 
         if should_print:
@@ -288,21 +259,6 @@ def create_server(
                 f'[VLAServer] req={n}  '
                 f'infer={infer_time*1000:.1f}ms  '
                 f'avg_infer={avg*1000:.1f}ms',
-                flush=True)
-
-        if should_profile:
-            gpu_part = (f'  model_gpu={model_gpu_ms:.1f}ms'
-                        if model_gpu_ms is not None else '')
-            print(
-                f'[VLAServerProfile] req={n} '
-                f'decode={(t_decoded - t_request)*1000:.1f}ms  '
-                f'preprocess={(t_preprocessed - t_decoded)*1000:.1f}ms  '
-                f'h2d={(t_device_ready - t_preprocessed)*1000:.1f}ms  '
-                f'model_enqueue={(t_model_returned - t_device_ready)*1000:.1f}ms'
-                f'{gpu_part}  '
-                f'denorm={(t_denormalized - t_model_returned)*1000:.1f}ms  '
-                f'serialize={(t_serialized - t_denormalized)*1000:.1f}ms  '
-                f'total={(t_serialized - t_request)*1000:.1f}ms',
                 flush=True)
 
         return {'action_data': action_bytes, 'infer_time': infer_time}

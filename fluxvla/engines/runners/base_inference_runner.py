@@ -120,19 +120,11 @@ class BaseInferenceRunner:
                 denormalize_action)
             dataset['norm_stats'] = data_stat_path
             dataset['model_path'] = os.path.dirname(os.path.dirname(ckpt_path))
-            stage_t0 = time.perf_counter()
             self.dataset = build_dataset_from_cfg(dataset)
-            overwatch.info(
-                f'[Startup] build_dataset: {time.perf_counter() - stage_t0:.1f}s'
-            )
 
-            stage_t0 = time.perf_counter()
             self.vla = build_vla_from_cfg(cfg.inference_model)
-            overwatch.info(
-                f'[Startup] build_vla: {time.perf_counter() - stage_t0:.1f}s')
             assert Path.exists(Path(ckpt_path)), \
                 f'Checkpoint path {ckpt_path} does not exist!'
-            stage_t0 = time.perf_counter()
             if ckpt_path.endswith('.safetensors'):
                 state_dict = load_file(ckpt_path, device='cpu')
             else:
@@ -141,14 +133,7 @@ class BaseInferenceRunner:
                     state_dict = checkpoint['model']
                 else:
                     state_dict = checkpoint
-            overwatch.info(
-                f'[Startup] load_checkpoint_to_cpu: {time.perf_counter() - stage_t0:.1f}s'
-            )
-            stage_t0 = time.perf_counter()
             self.vla.load_state_dict(state_dict, strict=True)
-            overwatch.info(
-                f'[Startup] load_state_dict: {time.perf_counter() - stage_t0:.1f}s'
-            )
         else:
             self.dataset = None
             self.denormalize_action = None
@@ -167,11 +152,7 @@ class BaseInferenceRunner:
         self.task_suite_name = task_suite_name
 
         # Initialize ROS operator and observation window
-        stage_t0 = time.perf_counter()
         self.ros_operator = build_operator_from_cfg(operator)
-        overwatch.info(
-            f'[Startup] build_ros_operator: {time.perf_counter() - stage_t0:.1f}s'
-        )
         self.observation_window = None
 
         # Initialize task configurations
@@ -187,9 +168,6 @@ class BaseInferenceRunner:
         # Becomes _prev_ctx in the next iteration for cross-chunk continuity.
         self._prev_ctx = None
         self._action_ctx = SimpleNamespace()
-        overwatch.info(
-            f'[Startup] BaseInferenceRunner.__init__ total: {time.perf_counter() - startup_t0:.1f}s'
-        )
 
     def _init_zmq_client(self, cfg: Dict):
         """Initialize ZMQ client for remote inference.
@@ -378,9 +356,7 @@ class BaseInferenceRunner:
                         dtype=self.mixed_precision_dtype,
                         enabled=(self.enable_mixed_precision
                                  and not self._use_remote)):
-
                     raw_action = self._predict_action(inputs)
-                torch.cuda.synchronize()
                 actions = self._postprocess_actions(raw_action)
                 self._execute_actions(actions, rate)
 
