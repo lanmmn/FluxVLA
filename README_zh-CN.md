@@ -55,6 +55,10 @@ FluxVLA Engine是面向具身智能落地应用的全链路一体化工程平台
 
 ## 📢 最新动态
 
+**\[2026/06/30\]** 🔥 FluxVLA 现已支持在 NVIDIA Jetson Orin 上部署，并集成模型加速优化以提升端侧推理效率。Orin 初始刷机流程见 [docs/orin_flashing_zh-CN.md](docs/orin_flashing_zh-CN.md)，FluxVLA Docker 环境启动与运行测试见 [docs/orin_docker_runtime_zh-CN.md](docs/orin_docker_runtime_zh-CN.md)。
+
+**\[2026/06/25\]** 🔥 现已支持 GR00T-RTC 加速版本，在 RTX 5090 设备上可达到 45 Hz。
+
 **\[2026/06/17\]** 🔥 现已支持 ARM 奖励建模与 RA-BC/AW-BC 重加权。配置与使用方法见 [docs/arm.md](docs/arm.md)。
 
 **\[2026/06/10\]** 🔥 现已支持基于 GR00T 的 RoboCasa GR1 仿真任务。
@@ -76,16 +80,6 @@ FluxVLA Engine是面向具身智能落地应用的全链路一体化工程平台
 **\[2026/04/08\]** 🔥 FluxVLA开源了。
 
 ## 🛠️ 安装
-
-Jetson Orin 从刷机到 JetPack 初始化见 [docs/orin_flashing_zh-CN.md](docs/orin_flashing_zh-CN.md)，Docker 使用说明见 [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md)。
-
-如果在 Orin 上构建 Docker 镜像时 `ports.ubuntu.com` 或 PyPI 网络不稳定，可以临时启用国内源：
-
-```bash
-FLUXVLA_USE_CN_MIRRORS=1 docker/build_docker.sh
-```
-
-更多 Docker 构建、ROS 镜像、FlashAttention 和自定义镜像源说明见 [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md)。
 
 <details>
 <summary><b>1. 创建 conda 环境</b></summary>
@@ -152,6 +146,13 @@ pip install --no-build-isolation -e .
 ```
 
 > **说明**：`requirements.txt` 固定了 `torch==2.8.0`，以避免 pip 意外替换掉第 2 步安装的 CUDA 版 PyTorch。若需使用其他 torch 版本，请同时更新第 2 步命令与 `requirements.txt` 中的版本。
+
+</details>
+
+<details>
+<summary><b>Jetson Orin Docker 配置</b></summary>
+
+Jetson Orin 从刷机到 JetPack 初始化见 [docs/orin_flashing_zh-CN.md](docs/orin_flashing_zh-CN.md)，FluxVLA Docker 环境启动与运行测试见 [docs/orin_docker_runtime_zh-CN.md](docs/orin_docker_runtime_zh-CN.md)。
 
 </details>
 
