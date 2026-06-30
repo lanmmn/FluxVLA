@@ -100,7 +100,6 @@ class BaseInferenceRunner:
                                      build_transform_from_cfg,
                                      build_vla_from_cfg)
 
-        startup_t0 = time.perf_counter()
         self.ckpt_path = ckpt_path
         self._use_remote = remote_inference is not None
 
@@ -531,23 +530,7 @@ class BaseInferenceRunner:
             self.execute_task_pose(task_id)
             input('Enter task ID (or press Enter for default): ').strip()
 
-        while True:
-            repeat_text = input(
-                'Number of times to repeat the task (default 1): ').strip()
-            if repeat_text == '':
-                num_times = 1
-                break
-            try:
-                num_times = int(repeat_text)
-            except ValueError:
-                print(
-                    f'Invalid repeat count: {repeat_text!r}. Please enter an integer.'
-                )
-                continue
-            if num_times < 1:
-                print('Repeat count must be >= 1.')
-                continue
-            break
+        num_times = int(input('Number of times to repeat the task: '))
         task_description = self._get_task_description(task_id)
         return [task_description] * num_times
 
