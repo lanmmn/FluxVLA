@@ -55,6 +55,10 @@ FluxVLA Engine is a full-stack, end-to-end engineering platform for deploying em
 
 ## 📢 Latest News
 
+**\[2026/06/30\]** 🔥 FluxVLA deployment on NVIDIA Jetson Orin is now supported, with model acceleration optimizations for efficient edge inference. See [docs/orin_flashing.md](docs/orin_flashing.md) for Orin initial flashing and [docs/orin_docker_runtime.md](docs/orin_docker_runtime.md) to start FluxVLA docker setup.
+
+**\[2026/06/25\]** 🔥 GR00T-RTC-accelerated version is now supported, achieving 45 Hz on RTX 5090 device.
+
 **\[2026/06/17\]** 🔥 ARM reward modeling with RA-BC/AW-BC reweighting is now supported. See [docs/arm.md](docs/arm.md) for setup and usage.
 
 **\[2026/06/10\]** 🔥 RoboCasa GR1 simulation tasks with GR00T are now supported.
@@ -76,48 +80,6 @@ FluxVLA Engine is a full-stack, end-to-end engineering platform for deploying em
 **\[2026/04/08\]** 🔥 FluxVLA has been open-sourced.
 
 ## 🛠️ Installation
-
-For the validated Jetson Orin Docker workflow, see [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md).
-
-**Orin Docker Images**
-
-常用的 Orin 镜像（详见上文链接）：
-
-- `fluxvla:orin-base` — 最小运行时基线（Jetson L4T、PyTorch、Triton、FluxVLA 通用依赖）。
-- `fluxvla:orin-fa` — 在 `orin-base` 上增加为 SM87 预编译的 `flash-attn`，适合 attention-heavy 推理场景。
-- `fluxvla:orin-ros` — 在 `orin-base` 上增加 ROS Noetic 运行时与 Python 绑定，用于机器人集成。
-- `fluxvla:orin-ros-fa` — 集成 ROS 与 FlashAttention 的完整镜像，适合真机同时运行 ROS 节点与高性能推理。
-
-选择建议与构建流程请参考 [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md) 中的“选择指南”与“推荐的分层构建流程”。
-
-If `ports.ubuntu.com` or PyPI is unstable while building the Orin Docker image in mainland China, enable the bundled mirror option:
-
-```bash
-FLUXVLA_USE_CN_MIRRORS=1 docker/build_docker.sh
-```
-
-More Docker build, ROS image, FlashAttention, and custom mirror options are documented in [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md).
-
-For the validated Jetson Orin Docker workflow, see [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md).
-
-**Orin Docker Images**
-
-常用的 Orin 镜像（详见上文链接）：
-
-- `fluxvla:orin-base` — 最小运行时基线（Jetson L4T、PyTorch、Triton、FluxVLA 通用依赖）。
-- `fluxvla:orin-fa` — 在 `orin-base` 上增加为 SM87 预编译的 `flash-attn`，适合 attention-heavy 推理场景。
-- `fluxvla:orin-ros` — 在 `orin-base` 上增加 ROS Noetic 运行时与 Python 绑定，用于机器人集成。
-- `fluxvla:orin-ros-fa` — 集成 ROS 与 FlashAttention 的完整镜像，适合真机同时运行 ROS 节点与高性能推理。
-
-选择建议与构建流程请参考 [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md) 中的“选择指南”与“推荐的分层构建流程”。
-
-If `ports.ubuntu.com` or PyPI is unstable while building the Orin Docker image in mainland China, enable the bundled mirror option:
-
-```bash
-FLUXVLA_USE_CN_MIRRORS=1 docker/build_docker.sh
-```
-
-More Docker build, ROS image, FlashAttention, and custom mirror options are documented in [docker/README_DOCKER_ORIN.md](docker/README_DOCKER_ORIN.md).
 
 > **Note for existing installations**
 >
@@ -204,6 +166,13 @@ pip install --no-build-isolation -e .
 ```
 
 > **Note**: `requirements.txt` pins `torch==2.6.0` to prevent pip from accidentally replacing the CUDA-enabled PyTorch installed in step 2. If you need to use another torch version, update both the step-2 command and the torch version in `requirements.txt`.
+
+</details>
+
+<details>
+<summary><b>Jetson Orin Docker Configuration</b></summary>
+
+For Jetson Orin setup, see [docs/orin_flashing.md](docs/orin_flashing.md) for initial flashing and JetPack setup, and [docs/orin_docker_runtime.md](docs/orin_docker_runtime.md) for the validated FluxVLA Docker runtime workflow.
 
 </details>
 

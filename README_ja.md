@@ -55,6 +55,10 @@ FluxVLA Engine は、具現知能（Embodied Intelligence）の実運用を見�
 
 ## 📢 最新情報
 
+**\[2026/06/30\]** 🔥 FluxVLA は NVIDIA Jetson Orin へのデプロイに対応し、エッジ推論を効率化するモデル高速化最適化も利用できるようになりました。Orin の初期フラッシュ手順は [docs/orin_flashing.md](docs/orin_flashing.md)、FluxVLA Docker セットアップの起動手順は [docs/orin_docker_runtime.md](docs/orin_docker_runtime.md) を参照してください。
+
+**\[2026/06/25\]** 🔥 GR00T-RTC 高速化版をサポートしました。RTX 5090 デバイス上で 45 Hz を達成しています。
+
 **\[2026/06/17\]** 🔥 ARM 報酬モデリングと RA-BC/AW-BC 再重み付けをサポートしました。セットアップと使い方は [docs/arm.md](docs/arm.md) を参照してください。
 
 **\[2026/06/10\]** 🔥 GR00T による RoboCasa GR1 シミュレーションタスクに対応しました。
@@ -142,6 +146,13 @@ pip install --no-build-isolation -e .
 ```
 
 > **補足**：`requirements.txt` では `torch==2.8.0` を固定しています。これにより、2 番目の手順でインストールした CUDA 対応 PyTorch を pip が意図せず置き換えるのを防ぎます。別の torch バージョンを使う必要がある場合は、2 番目のコマンドと `requirements.txt` 内のバージョンの両方を更新してください。
+
+</details>
+
+<details>
+<summary><b>Jetson Orin Docker 設定</b></summary>
+
+Jetson Orin の初期フラッシュと JetPack セットアップは [docs/orin_flashing.md](docs/orin_flashing.md)、検証済みの FluxVLA Docker ランタイム手順は [docs/orin_docker_runtime.md](docs/orin_docker_runtime.md) を参照してください。
 
 </details>
 
