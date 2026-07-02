@@ -317,21 +317,23 @@ class DenormalizePrivateAction(DenormalizeLiberoAction):
                                              self.action_norm_mask)
             if self.discrete_action_dims:
                 feat_dim = cont.shape[-1]
-                assert all(0 <= d < feat_dim
-                           for d in self.discrete_action_dims), (
-                    f'discrete_action_dims {self.discrete_action_dims} '
-                    f'out of range for action width {feat_dim}')
+                assert all(
+                    0 <= d < feat_dim for d in self.discrete_action_dims), (
+                        f'discrete_action_dims {self.discrete_action_dims} '
+                        f'out of range for action width {feat_dim}')
                 disc_mask = np.zeros(feat_dim, dtype=bool)
                 disc_mask[list(self.discrete_action_dims)] = True
-                disc = self._denormalize_by_type(
-                    action, stats, self.discrete_norm_type,
-                    disc_mask.tolist())
+                disc = self._denormalize_by_type(action, stats,
+                                                 self.discrete_norm_type,
+                                                 disc_mask.tolist())
                 action = np.where(disc_mask, disc, cont)
             else:
                 action = cont
         return action
 
-    def _denormalize_by_type(self, action: np.ndarray, stats: Dict,
+    def _denormalize_by_type(self,
+                             action: np.ndarray,
+                             stats: Dict,
                              norm_type: str,
                              mask: List[bool] = None) -> np.ndarray:
         saved = self.action_norm_mask
@@ -444,7 +446,9 @@ class NormalizeStatesAndActions:
         padded[..., :current_dim] = values
         return padded
 
-    def _normalize_mixed(self, x, stats: Dict,
+    def _normalize_mixed(self,
+                         x,
+                         stats: Dict,
                          discrete_dims: List[int] = None,
                          base_mask: List[bool] = None):
         cont = self._apply_norm(x, stats, self.norm_type, base_mask)
@@ -463,7 +467,10 @@ class NormalizeStatesAndActions:
         disc = self._apply_norm(x, stats, self.discrete_norm_type, disc_mask)
         return np.where(disc_mask, disc, cont)
 
-    def _apply_norm(self, x, stats: Dict, norm_type: str,
+    def _apply_norm(self,
+                    x,
+                    stats: Dict,
+                    norm_type: str,
                     norm_mask: List[bool] = None):
         if norm_type == 'quantile':
             return self._normalize_quantile(x, stats, norm_mask)

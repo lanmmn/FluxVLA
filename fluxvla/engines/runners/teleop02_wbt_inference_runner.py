@@ -114,7 +114,8 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
             kwargs['operator'] = {
                 'type': 'Teleop02WbtOperator',
                 'head_rgb_topic': '/head/color/image_raw/compressed',
-                'left_wrist_rgb_topic': '/left_wrist_camera/color/image_raw/compressed',
+                'left_wrist_rgb_topic':
+                '/left_wrist_camera/color/image_raw/compressed',
                 'joint_state_topic': '/joint/state',
                 'finger_state_topic': '/brainco1/hand/state',
                 'finger_cmd_topic': '/brainco1/hand/cmd',
@@ -131,9 +132,8 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
         super().__init__(*args, **kwargs)
 
         self.done_subtask_order = (
-            self._done_subtask_order_arg
-            if self._done_subtask_order_arg is not None
-            else list(self.task_descriptions.keys()))
+            self._done_subtask_order_arg if self._done_subtask_order_arg
+            is not None else list(self.task_descriptions.keys()))
         assert len(self.done_subtask_order) > 0, (
             'done_subtask_order must be non-empty')
         unknown = [
@@ -175,7 +175,7 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
 
         self._running = True
         self._dt = 1.0 / getattr(self, 'publish_rate',
-                                  kwargs.get('publish_rate'))
+                                 kwargs.get('publish_rate'))
         self._model_warmed_up = False
 
         # Register signal handler for graceful shutdown
@@ -228,8 +228,9 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
         head_img, left_wrist_img, state = result
 
         warmup_start = time.perf_counter()
-        print('[warmup] First image received. Starting model warmup...',
-              flush=True)
+        print(
+            '[warmup] First image received. Starting model warmup...',
+            flush=True)
 
         warmup_obs = {'qpos': state}
         imgs = [head_img, left_wrist_img]
@@ -273,11 +274,10 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
         """
         t = 0
 
-        print ("run episode()")
+        print('run episode()')
 
         while t < self.max_publish_step and self._running:
-            instructions = self._get_user_task_instruction(
-                default_instruction)
+            instructions = self._get_user_task_instruction(default_instruction)
             self._prev_ctx = None
             for instruction in instructions:
                 if not self._running:
@@ -435,8 +435,8 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
         while self._running:
             get_frame_start = time.perf_counter()
             result = self.ros_operator.get_frame()
-            get_frame_elapsed_ms = (
-                time.perf_counter() - get_frame_start) * 1000.0
+            get_frame_elapsed_ms = (time.perf_counter() -
+                                    get_frame_start) * 1000.0
             if result is not False:
                 print(
                     f'get_frame() elapsed: {get_frame_elapsed_ms:.3f} ms, '

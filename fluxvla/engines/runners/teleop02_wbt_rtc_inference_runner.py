@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass
-from threading import Event, Lock, Thread
 import time
 import traceback
+from dataclasses import dataclass
+from threading import Event, Lock, Thread
 from types import SimpleNamespace
 
 import numpy as np
@@ -24,10 +24,8 @@ import torch
 from ..operators.teleop02_wbt_operator import interpolate_wbt_actions
 from ..utils import initialize_overwatch
 from ..utils.root import RUNNERS
-from .teleop02_wbt_inference_runner import (
-    Teleop02WbtInferenceRunner,
-    decide_advance,
-)
+from .teleop02_wbt_inference_runner import (Teleop02WbtInferenceRunner,
+                                            decide_advance)
 
 overwatch = initialize_overwatch(__name__)
 
@@ -230,12 +228,12 @@ class ChunkScheduler:
             if executed_since_request == clipped_prefix_len:
                 self.active_original = original_actions.copy()
                 self.active_processed = processed_actions.copy()
-                self.active_processed_base_pos = (None if processed_base_pos
-                                                  is None else
-                                                  processed_base_pos.copy())
-                self.active_processed_base_quat = (None if processed_base_quat
-                                                   is None else
-                                                   processed_base_quat.copy())
+                self.active_processed_base_pos = (
+                    None if processed_base_pos is None else
+                    processed_base_pos.copy())
+                self.active_processed_base_quat = (
+                    None if processed_base_quat is None else
+                    processed_base_quat.copy())
                 self.active_index = self._source_to_processed_index(
                     clipped_prefix_len, self.active_processed)
                 self.active_chunk_id = chunk_id
@@ -253,9 +251,9 @@ class ChunkScheduler:
             self.pending_processed_base_pos = (None
                                                if processed_base_pos is None
                                                else processed_base_pos.copy())
-            self.pending_processed_base_quat = (None if processed_base_quat
-                                                is None else
-                                                processed_base_quat.copy())
+            self.pending_processed_base_quat = (
+                None
+                if processed_base_quat is None else processed_base_quat.copy())
             self.pending_start_index = self._source_to_processed_index(
                 clipped_prefix_len, self.pending_processed)
             self.pending_activation_index = self._source_to_processed_index(
@@ -508,9 +506,9 @@ class Teleop02WbtRTCInferenceRunner(Teleop02WbtInferenceRunner):
                 overwatch.info(
                     f'[MAIN] Action queue size: {scheduler.qsize()}')
                 last_log_time = now
-            if self.max_publish_step and (now - start_time
-                                          > self.max_publish_step * self._dt +
-                                          30.0):
+            if self.max_publish_step and (
+                    now - start_time >
+                    self.max_publish_step * self._dt + 30.0):
                 stop_event.set()
 
         if advance_event.is_set() or final_done_event.is_set():

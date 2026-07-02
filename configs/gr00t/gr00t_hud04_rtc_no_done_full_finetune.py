@@ -236,9 +236,7 @@ inference = dict(
                 **WBT_NORM_KW)
         ]),
     denormalize_action=dict(
-        type='DenormalizePrivateAction',
-        action_dim=42,
-        **WBT_DENORM_KW),
+        type='DenormalizePrivateAction', action_dim=42, **WBT_DENORM_KW),
     operator=dict(
         type='Teleop02WbtOperator',
         head_rgb_topic='/head/color/image_raw/compressed',
