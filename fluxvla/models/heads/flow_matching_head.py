@@ -285,6 +285,12 @@ class FlowMatchingHead(nn.Module):
             states.unsqueeze(1), embodiment_ids)
         noise = torch.randn(
             actions.shape, device=actions.device, dtype=actions.dtype)
+        # Padding action dims [ori_action_dim:action_dim] are zeros in the
+        # dataset. Keep their noise at zero too, otherwise the action encoder
+        # attends over pure padding noise while the loss only supervises valid
+        # leading dims.
+        if self.ori_action_dim is not None:
+            noise[..., self.ori_action_dim:] = 0
         t_scalar = self.sample_time(
             actions.shape[0], device=actions.device, dtype=actions.dtype)
         T = actions.shape[1]
@@ -413,6 +419,8 @@ class FlowMatchingHead(nn.Module):
                                   device=device)
             v = denoise(actions, t_global)
             actions = actions + dt * v
+            if self.ori_action_dim is not None:
+                actions[..., self.ori_action_dim:] = 0
         return actions
 
     def _predict_action_prefix_rtc(self, actions, denoise, batch_size, device,
@@ -432,8 +440,12 @@ class FlowMatchingHead(nn.Module):
             t_enc[:, :prefix_len] = self.num_timestep_buckets
             v = denoise(actions, t_global, t_enc)
             actions = actions + dt * v
+            if self.ori_action_dim is not None:
+                actions[..., self.ori_action_dim:] = 0
 
         actions[:, :prefix_len] = prev_actions[:, :prefix_len]
+        if self.ori_action_dim is not None:
+            actions[..., self.ori_action_dim:] = 0
         return actions
 
     def _predict_action_guidance_rtc(self, actions, denoise, batch_size,
@@ -466,6 +478,8 @@ class FlowMatchingHead(nn.Module):
                 max_gw,
                 use_vjp=use_vjp)
             actions = actions + dt * v
+            if self.ori_action_dim is not None:
+                actions[..., self.ori_action_dim:] = 0
         return actions
 
     def predict_action(self,
@@ -487,6 +501,8 @@ class FlowMatchingHead(nn.Module):
             dtype=input_features.dtype,
             device=input_features.device,
         )
+        if self.ori_action_dim is not None:
+            actions[..., self.ori_action_dim:] = 0
         dt = 1.0 / self.num_inference_timesteps
 
         if (prev_actions is not None and self.ori_action_dim is not None
@@ -536,7 +552,7 @@ class FlowMatchingHead(nn.Module):
 
     def sample_time(self, batch_size, device, dtype):
         sample = self.beta_dist.sample([batch_size]).to(device, dtype=dtype)
-        return (self.noise_s - sample) / self.noise_s
+        return ((self.noise_s - sample) / self.noise_s).clamp_(0.0, 1.0)
 
     def get_fsdp_wrapping_policy(self) -> Callable:
         """
