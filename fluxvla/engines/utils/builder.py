@@ -23,14 +23,6 @@ from mmengine.utils import ManagerMixin
 from fluxvla.engines.utils.registry import Registry
 
 
-def _safe_print_log(*args, **kwargs):
-    try:
-        from mmengine.logging import print_log
-        print_log(*args, **kwargs)
-    except Exception:
-        pass
-
-
 def build_from_cfg(
         cfg: Union[dict, ConfigDict, Config],
         registry: Registry,
@@ -78,6 +70,7 @@ def build_from_cfg(
         object: The constructed object.
     """
     # Avoid circular import
+    from mmengine.logging import print_log
 
     if not isinstance(cfg, (dict, ConfigDict, Config)):
         raise TypeError(
@@ -138,14 +131,14 @@ def build_from_cfg(
 
         if (inspect.isclass(obj_cls) or inspect.isfunction(obj_cls)
                 or inspect.ismethod(obj_cls)):
-            _safe_print_log(
+            print_log(
                 f"An '{obj_cls.__name__}' instance is built from "  # type: ignore # noqa: E501
                 'registry, and its implementation can be found in '
                 f'{obj_cls.__module__}',  # type: ignore
                 logger='current',
                 level=logging.DEBUG)
         else:
-            _safe_print_log(
+            print_log(
                 'An instance is built from registry, and its constructor '
                 f'is {obj_cls}',
                 logger='current',
@@ -363,6 +356,16 @@ def build_runner_from_cfg(
     return build_from_cfg(cfg, RUNNERS, default_args)
 
 
+def build_lr_scheduler_from_cfg(
+    cfg: Union[dict, ConfigDict, Config],
+    default_args: Optional[Union[dict, 'ConfigDict', 'Config']] = None
+) -> 'nn.Module':
+    """Build a learning rate scheduler policy from config."""
+    from fluxvla.optimizers import lr_scheduler_policies  # noqa: F401
+    from .root import LR_SCHEDULERS
+    return build_from_cfg(cfg, LR_SCHEDULERS, default_args)
+
+
 def build_collator_from_cfg(
     cfg: Union[dict, ConfigDict, Config],
     default_args: Optional[Union[dict, 'ConfigDict', 'Config']] = None
@@ -454,13 +457,3 @@ def build_weighter_from_cfg(
     """Build an RA-BC sample weighter from a config dict."""
     from .root import WEIGHTERS
     return build_from_cfg(cfg, WEIGHTERS, default_args)
-
-
-def build_evaluator_from_cfg(
-        cfg: Union[dict, ConfigDict, Config],
-        default_args: Optional[Union[dict, 'ConfigDict',
-                                     'Config']] = None) -> Any:
-    """Build a training-time evaluator policy from config."""
-    from fluxvla.evaluators import evaluator_policies  # noqa: F401
-    from .root import EVALUATORS
-    return build_from_cfg(cfg, EVALUATORS, default_args)

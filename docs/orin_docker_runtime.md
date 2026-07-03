@@ -348,7 +348,7 @@ Baseline:
 
 ```bash
 FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
-  python3 test/test_models/test-gr00t-100times.py \
+  python3 test/test_models/test_gr00t_orin.py \
     --variant baseline \
     --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
     --ckpt "$CKPT" \
@@ -360,7 +360,7 @@ Accelerated:
 
 ```bash
 FLUXVLA_IMAGE=fluxvla:orin-ros-fa docker/run_docker.sh \
-  python3 test/test_models/test-gr00t-100times.py \
+  python3 test/test_models/test_gr00t_orin.py \
     --variant accelerated \
     --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
     --ckpt "$CKPT" \

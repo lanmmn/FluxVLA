@@ -7,7 +7,7 @@ optimizing.  Reuses the e2e build path.
 
 Run inside ``fluxvla:orin``::
 
-    python scripts/profile_pi05_phases.py
+    python test/test_models/test_pi05_orin.py
 """
 import statistics
 

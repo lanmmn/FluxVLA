@@ -13,26 +13,12 @@
 # limitations under the License.
 
 import argparse
-import time
 
 from mmengine import Config
 
-import fluxvla.collators  # noqa: F401
-import fluxvla.datasets  # noqa: F401
-import fluxvla.engines.operators  # noqa: F401
-import fluxvla.tokenizers  # noqa: F401
-import fluxvla.transforms  # noqa: F401
 from fluxvla.engines import build_runner_from_cfg
 from fluxvla.engines.utils.torch_utils import \
     configure_inference_attention_defaults
-from fluxvla.models.backbones.vlms.eagle import EagleBackbone  # noqa: F401
-from fluxvla.models.backbones.vlms.eagle import \
-    EagleInferenceBackbone  # noqa: F401
-from fluxvla.models.heads.flow_matching_head import \
-    FlowMatchingHead  # noqa: F401
-from fluxvla.models.heads.flow_matching_inference_head import \
-    FlowMatchingInferenceHead  # noqa: F401
-from fluxvla.models.vlas.llava_vla import LlavaVLA  # noqa: F401
 
 
 def parse_args():
@@ -58,26 +44,13 @@ def inference(args, cfg):
 
 
 if __name__ == '__main__':
-    startup_t0 = time.perf_counter()
     configure_inference_attention_defaults()
     args = parse_args()
-    stage_t0 = time.perf_counter()
     cfg = Config.fromfile(args.config)
     if args.ckpt_path is not None:
         cfg.inference.ckpt_path = args.ckpt_path
     cfg.inference.cfg = cfg
-    stage_t0 = time.perf_counter()
     inference_runner = build_runner_from_cfg(cfg.inference)
-    build_elapsed = time.perf_counter() - stage_t0
-    print(f'[Startup] build_runner_from_cfg: {build_elapsed:.1f}s', flush=True)
-    stage_t0 = time.perf_counter()
     inference_runner.run_setup()
-    print(
-        f'[Startup] run_setup_ros: {time.perf_counter() - stage_t0:.1f}s',
-        flush=True)
-    startup_elapsed = time.perf_counter() - startup_t0
-    print(
-        f'[Startup] total_before_interactive_loop: {startup_elapsed:.1f}s',
-        flush=True)
 
     inference_runner.run()

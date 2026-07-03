@@ -393,7 +393,8 @@ OK
 快速验证链路：
 
 ```bash
-./run_docker.sh python3 /mnt/nvme/gr00t/test_gr00t_with_embodiment_fixed.py \
+./run_docker.sh python3 test/test_models/test_gr00t_orin.py \
+  --variant baseline \
     --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
     --ckpt /mnt/nvme/gr00t/gr00t_eagle_3b_ur3_full_finetune_orin/checkpoints/step-000100-epoch-00-loss=1.2629.pt \
     --warmup 0 --predict-runs 1
@@ -402,7 +403,8 @@ OK
 100 次 benchmark：
 
 ```bash
-./run_docker.sh python3 /mnt/nvme/gr00t/test_gr00t_with_embodiment_fixed.py \
+./run_docker.sh python3 test/test_models/test_gr00t_orin.py \
+  --variant baseline \
     --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
     --ckpt /mnt/nvme/gr00t/gr00t_eagle_3b_ur3_full_finetune_orin/checkpoints/step-000100-epoch-00-loss=1.2629.pt \
     --warmup 5 --predict-runs 100
@@ -411,7 +413,8 @@ OK
 后台运行（长时间任务）：
 
 ```bash
-nohup ./run_docker.sh python3 /mnt/nvme/gr00t/test_gr00t_with_embodiment_fixed.py \
+nohup ./run_docker.sh python3 test/test_models/test_gr00t_orin.py \
+  --variant baseline \
     --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
     --ckpt /mnt/nvme/gr00t/gr00t_eagle_3b_ur3_full_finetune_orin/checkpoints/step-000100-epoch-00-loss=1.2629.pt \
     --warmup 5 --predict-runs 100 \
@@ -430,22 +433,17 @@ load_state_dict: missing=0, unexpected=0
 使用 `FlowMatchingInferenceHead` + `EagleInferenceBackbone`（Triton kernel + CUDA Graph）：
 
 ```bash
-./run_docker.sh python3 /mnt/nvme/gr00t/test_gr00t_accel_100run.py \
+./run_docker.sh python3 test/test_models/test_gr00t_orin.py \
+  --variant accelerated \
     --config configs/gr00t/gr00t_eagle_3b_ur3_full_finetune.py \
     --ckpt /mnt/nvme/gr00t/gr00t_eagle_3b_ur3_full_finetune_orin/checkpoints/step-000100-epoch-00-loss=1.2629.pt \
     --warmup 5 --predict-runs 100
 ```
 
-分段计时（VLM backbone + VLA head 分别测量）：
-
-```bash
-./run_docker.sh python3 /mnt/nvme/gr00t/gr00t_accel_split_100.py
-```
-
 ## Pi0.5 Triton 测试
 
 ```bash
-./run_docker.sh python3 /mnt/nvme/sober/tmp/pi05_triton_bench_real_100.py
+./run_docker.sh python3 test/test_models/test_pi05_orin.py
 ```
 
 首次运行会录制 CUDA Graph，100 次统计耗时较长。
