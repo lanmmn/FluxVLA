@@ -25,15 +25,18 @@ try:
     from .fluxbisim_base_inference_runner import \
         BaseInferenceRunnerSim  # noqa: F401, F403
     from .fsdp_train_runner import FSDPTrainRunner  # noqa: F401, F403
-    from .libero_eval_runner import LiberoEvalRunner  # noqa: F401, F403
     from .libero_inference_runner import \
         LiberoInferenceRunner  # noqa: F401, F403
 except Exception as e:
     # Orin docker not install libero / fluxbisim env
     import warnings
-    warnings.warn(f"Model Inference on AGX Orin, skip import: {e}")
+    warnings.warn(f'Model Inference on AGX Orin, skip import: {e}')
     pass
 
+from .teleop02_wbt_inference_runner import \
+    Teleop02WbtInferenceRunner  # noqa: F401, F403
+from .teleop02_wbt_rtc_inference_runner import \
+    Teleop02WbtRTCInferenceRunner  # noqa: F401, F403
 from .tron2_inference_runner import Tron2InferenceRunner  # noqa: F401, F403
 from .tron2_rtc_inference_runner import \
     Tron2RTCInferenceRunner  # noqa: F401, F403
