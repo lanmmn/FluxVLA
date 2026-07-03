@@ -423,7 +423,7 @@ load_state_dict(strict=False): missing=0 unexpected=0
 
 实际执行的是带真实权重的 Triton benchmark 脚本：
 
-- `/mnt/nvme/sober/tmp/pi05_triton_bench_real_100.py`
+- `test/test_models/test_pi05_orin.py`
 
 对应执行命令：
 
@@ -434,7 +434,7 @@ docker run --rm --runtime nvidia \
   -v /home/limx/sober:/home/limx/sober \
   -e PYTHONPATH=/mnt/nvme/sober/pylibs/triton351:/home/limx/sober/FluxVLA \
   fluxvla:orin \
-  python3 /mnt/nvme/sober/tmp/pi05_triton_bench_real_100.py
+  python3 test/test_models/test_pi05_orin.py
 ```
 
 结果：成功，退出码 `0`。
@@ -461,8 +461,8 @@ docker run --rm --runtime nvidia \
 
 日志文件：
 
-- `/mnt/nvme/sober/tmp/logs/pi05_triton_bench_real_100.log`
-- `/mnt/nvme/sober/tmp/logs/pi05_triton_bench_real_100.status`
+- `/mnt/nvme/sober/tmp/logs/test_pi05_orin.log`
+- `/mnt/nvme/sober/tmp/logs/test_pi05_orin.status`
 
 ### 结果解释
 

@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -185,14 +184,6 @@ class LlavaVLA(OpenVLA):
                        rtc_config: Optional[Dict] = None,
                        *args,
                        **kwargs):
-        profile = os.environ.get('FLUXVLA_PROFILE_PREDICT_ACTION', '0') == '1'
-        if profile and torch.cuda.is_available():
-            backbone_start = torch.cuda.Event(enable_timing=True)
-            backbone_end = torch.cuda.Event(enable_timing=True)
-            head_start = torch.cuda.Event(enable_timing=True)
-            head_end = torch.cuda.Event(enable_timing=True)
-            backbone_start.record()
-
         if hasattr(self, 'vlm_backbone') and self.vlm_backbone is not None:
             last_hidden_state, fused_attention_mask, _ = self.vlm_backbone(
                 images=images,
@@ -211,11 +202,6 @@ class LlavaVLA(OpenVLA):
                 assert 'last_hidden_state' in output, \
                     'Output must contain either hidden_states or last_hidden_state.'  # noqa: E501
                 last_hidden_state = output['last_hidden_state']
-
-        if profile and torch.cuda.is_available():
-            backbone_end.record()
-            head_start.record()
-
         pred_actions = self.vla_head.predict_action(
             input_features=last_hidden_state,
             states=states,
@@ -224,15 +210,4 @@ class LlavaVLA(OpenVLA):
             prev_actions=prev_actions,
             prefix_len=prefix_len,
             rtc_config=rtc_config)
-
-        if profile and torch.cuda.is_available():
-            head_end.record()
-            head_end.synchronize()
-            print(
-                '[LlavaVLAProfile] '
-                f'backbone={backbone_start.elapsed_time(backbone_end):.2f}ms  '
-                f'head={head_start.elapsed_time(head_end):.2f}ms  '
-                f'total={backbone_start.elapsed_time(head_end):.2f}ms',
-                flush=True)
-
         return pred_actions.float()
