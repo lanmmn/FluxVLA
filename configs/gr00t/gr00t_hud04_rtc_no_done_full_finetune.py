@@ -75,7 +75,7 @@ inference_model = dict(
         type='EagleBackbone',
         vlm_path=  # noqa: E251
         'fluxvla/models/third_party_models/eagle2_hg_model',
-        vlm_config=dict(max_input_seq_len=600)),
+        vlm_config=dict(max_input_seq_len=580)),
     vla_head=dict(
         type='FlowMatchingHead',
         state_dim=64,
@@ -83,7 +83,7 @@ inference_model = dict(
         input_embedding_dim=1536,
         num_layers=1,
         num_heads=4,
-        num_inference_timesteps=4,
+        num_inference_timesteps=2,
         num_steps=32,
         traj_length=10,  # no use param
         action_dim=64,  # 42 raw dims padded to 64
@@ -213,7 +213,7 @@ inference = dict(
         transforms=[
             dict(
                 type='ProcessPromptsWithImage',
-                max_len=600,
+                max_len=580,
                 num_images=2,
                 tokenizer=dict(type='PretrainedTokenizer')),
             dict(type='ResizeImages', height=224, width=224),
