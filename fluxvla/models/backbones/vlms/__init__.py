@@ -27,11 +27,15 @@ try:
     from .florence2 import Florence2Backbone  # noqa: F401, F403
     from .paligemma import PaliGemma  # noqa: F401, F403
     from .qwen2_5_vl import QWen2_5VL  # noqa: F401, F403
-    from .qwen3_vl import Qwen3VL  # noqa: F401, F403
     from .smolvlm import SmolVLMBackbone  # noqa: F401, F403
 except ImportError as exc:
     if not _is_optional_torch_distributed_error(exc):
         raise
+
+try:
+    from .qwen3_vl import Qwen3VL  # noqa: F401, F403
+except ImportError:
+    pass
 
 try:
     from .wan_backbone import WanBackbone  # noqa: F401, F403
