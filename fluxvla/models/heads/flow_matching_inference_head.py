@@ -19,9 +19,9 @@ import torch
 import torch.nn.functional as F
 
 from fluxvla.engines import HEADS
-from fluxvla.ops.atomic_ops import dit_block_cross, dit_block_self, vl_sa_block
-from fluxvla.ops.triton.position_embedding import \
-    fused_position_embedding_add_inplace
+from fluxvla.ops.atomic_ops import (ada_layer_norm, dit_block_cross,
+                                    dit_block_self, vl_sa_block)
+from fluxvla.ops.triton.position_embedding import fused_concat_with_pos_emb
 from .flow_matching_head import FlowMatchingHead
 
 
@@ -548,6 +548,13 @@ class FlowMatchingInferenceHead(FlowMatchingHead):
                 1, self.num_steps, 1, dtype=torch.bfloat16, device='cuda'),
             'prefix_ts_mask':
             torch.zeros(1, self.num_steps, dtype=torch.float32, device='cuda'),
+            'action_dit_input':
+            torch.empty(
+                1,
+                1 + self.weights['future_tokens_w'].shape[0] + self.num_steps,
+                self.input_embedding_dim,
+                dtype=torch.bfloat16,
+                device='cuda'),
         }
 
         self.graph = torch.cuda.CUDAGraph()
@@ -646,16 +653,15 @@ class FlowMatchingInferenceHead(FlowMatchingHead):
                 self.weights['action_encoder_W3_b'], embodiment_ids,
                 self.input_embedding_dim)
 
-            # Position embedding
-            if self.add_positional_embeddings:
-                action_features = fused_position_embedding_add_inplace(
-                    action_features, self.weights['position_embedding_w'])
-
-            # Prepare DiT input
-            future_tok = self.weights['future_tokens_w'].unsqueeze(0)
-            sa_embs = torch.cat(
-                (self.buffers['state_features'], future_tok, action_features),
-                dim=1)
+            position_embedding = (
+                self.weights['position_embedding_w']
+                if self.add_positional_embeddings else None)
+            sa_embs = fused_concat_with_pos_emb(
+                self.buffers['state_features'],
+                self.weights['future_tokens_w'],
+                action_features,
+                position_embedding,
+                out=self.buffers['action_dit_input'])
 
             # DiT timestep encoding
             temb = _timestep_embedding(timesteps_tensor).to(
@@ -719,9 +725,7 @@ class FlowMatchingInferenceHead(FlowMatchingHead):
                 F.silu(temb), self.weights['dit_proj_out_1_w'],
                 self.weights['dit_proj_out_1_b']).chunk(
                     2, dim=1)
-            hidden_states = (
-                F.layer_norm(hidden_states, [inner_dim]) *
-                (1 + scale[:, None]) + shift[:, None])
+            hidden_states = ada_layer_norm(hidden_states, scale, shift)
             model_output = F.linear(hidden_states,
                                     self.weights['dit_proj_out_2_w'],
                                     self.weights['dit_proj_out_2_b'])

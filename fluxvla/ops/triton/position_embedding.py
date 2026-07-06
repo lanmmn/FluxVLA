@@ -237,10 +237,11 @@ def _fused_concat_pos_emb_kernel(
 
 
 def fused_concat_with_pos_emb(
-        state_features: torch.Tensor,  # (B, T_state, D)
-        future_tokens: torch.Tensor,  # (T_future, D)
-        action_features: torch.Tensor,  # (B, T_action, D)
-        position_embedding_weight: torch.Tensor = None,  # (max_seq_len, D)
+    state_features: torch.Tensor,  # (B, T_state, D)
+    future_tokens: torch.Tensor,  # (T_future, D)
+    action_features: torch.Tensor,  # (B, T_action, D)
+    position_embedding_weight: torch.Tensor = None,  # (max_seq_len, D)
+    out: torch.Tensor = None,
 ) -> torch.Tensor:
     """
     Fused Concat + Position Embedding operation.
@@ -258,6 +259,9 @@ def fused_concat_with_pos_emb(
         future_tokens: (T_future, D) - future tokens embedding weight
         action_features: (B, T_action, D) - action encoder output
         position_embedding_weight: (max_seq_len, D) - position embedding weight, optional
+
+        out: Optional preallocated output tensor,
+             shape (B, T_state + T_future + T_action, D)
 
     Returns:
         output: (B, T_state + T_future + T_action, D)
@@ -287,10 +291,23 @@ def fused_concat_with_pos_emb(
         # Create a dummy tensor for kernel argument (will not be used)
         position_embedding_weight = future_tokens
 
-    # Allocate output
-    output = torch.empty((B, T_total, D),
-                         dtype=state_features.dtype,
-                         device=state_features.device)
+    if out is None:
+        output = torch.empty((B, T_total, D),
+                             dtype=state_features.dtype,
+                             device=state_features.device)
+    else:
+        expected_shape = (B, T_total, D)
+        if tuple(out.shape) != expected_shape:
+            raise ValueError(
+                f'out shape must be {expected_shape}, got {tuple(out.shape)}')
+        if out.dtype != state_features.dtype:
+            raise ValueError(
+                f'out dtype must be {state_features.dtype}, got {out.dtype}')
+        if out.device != state_features.device:
+            raise ValueError(
+                f'out device must be {state_features.device}, got {out.device}'
+            )
+        output = out
 
     # Compute block size
     BLOCK_SIZE = 256
