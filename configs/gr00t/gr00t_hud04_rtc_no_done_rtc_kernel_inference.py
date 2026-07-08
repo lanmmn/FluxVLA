@@ -38,16 +38,33 @@ train_dataloader = _deepcopy(_base_globals['train_dataloader'])
 runner = _deepcopy(_base_globals['runner'])
 inference = _deepcopy(_base_globals['inference'])
 
+# prefix=0
 # inference['async_execution'] = False
 # inference['rtc_config']['prefix_len'] = 0
 # inference['execute_horizon'] = 12
 # inference['target_hz'] = 50
 
-# inference['publish_rate'] = 25
-# inference['async_remaining_actions_threshold'] = 7
-# inference['execute_horizon'] = 10
+# temp
+inference['publish_rate'] = 30
+inference['async_remaining_actions_threshold'] = 8
+inference['execute_horizon'] = 16
+inference['target_hz'] = 50
+inference['rtc_config']['prefix_len'] = 7
+
+
+# denoise step = 2 能抓, 但很抖
+# inference['publish_rate'] = 18
+# inference['async_remaining_actions_threshold'] = 8
+# inference['execute_horizon'] = 20
 # inference['target_hz'] = 50
-# inference['rtc_config']['prefix_len'] = 7
+# inference['rtc_config']['prefix_len'] = 5
+
+# inference['publish_rate'] = 16
+# inference['target_hz'] = 50
+# inference['async_remaining_actions_threshold'] = 8
+# inference['execute_horizon'] = 18
+# inference['rtc_config']['prefix_len'] = 5
+
 
 # inference['async_remaining_actions_threshold'] = 7
 # inference['execute_horizon'] = 15
@@ -85,6 +102,6 @@ inference_model['vla_head']['diffusion_model_cfg'] = dict(
     output_dim=1024,
     positional_embeddings=None,
 )
-
+inference_model['vla_head']['num_inference_timesteps'] = 2
 
 del _base_candidates, _base_globals, _base_path, _deepcopy, _Path
