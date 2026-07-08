@@ -14,7 +14,7 @@
 
 import argparse
 
-from mmengine import Config
+from mmengine import Config, DictAction
 
 from fluxvla.engines import build_runner_from_cfg
 from fluxvla.engines.utils.torch_utils import \
@@ -34,6 +34,11 @@ def parse_args():
         type=str,
         default=None,
         help='Path to the checkpoint file.')
+    parser.add_argument(
+        '--cfg-options',
+        nargs='+',
+        action=DictAction,
+        help='Override config settings as key=value pairs.')
     args = parser.parse_args()
     return args
 
@@ -47,6 +52,8 @@ if __name__ == '__main__':
     configure_inference_attention_defaults()
     args = parse_args()
     cfg = Config.fromfile(args.config)
+    if args.cfg_options is not None:
+        cfg.merge_from_dict(args.cfg_options)
     if args.ckpt_path is not None:
         cfg.inference.ckpt_path = args.ckpt_path
     cfg.inference.cfg = cfg

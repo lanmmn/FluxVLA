@@ -75,6 +75,7 @@ class ChunkScheduler:
         self.pending_chunk_id: int | None = None
 
         self._inference_in_flight = False
+        self._last_commit_debug = {}
 
     def _remaining_active_locked(self) -> int:
         if self.active_processed is None:
@@ -211,6 +212,15 @@ class ChunkScheduler:
         with self.lock:
             self._inference_in_flight = False
             if request.active_chunk_id != self.active_chunk_id:
+                self._last_commit_debug = {
+                    'reason': 'active_chunk_changed',
+                    'request_active_chunk_id': request.active_chunk_id,
+                    'current_active_chunk_id': self.active_chunk_id,
+                    'request_prefix_len': request.prefix_len,
+                    'request_remaining_actions': request.remaining_actions,
+                    'request_active_index': request.active_index_at_request,
+                    'current_active_index': self.active_index,
+                }
                 return False
 
             clipped_prefix_len = min(
@@ -223,6 +233,21 @@ class ChunkScheduler:
                                          source_index - request_source_index)
 
             if executed_since_request > clipped_prefix_len:
+                self._last_commit_debug = {
+                    'reason': 'prefix_window_passed',
+                    'request_prefix_len': request.prefix_len,
+                    'clipped_prefix_len': clipped_prefix_len,
+                    'request_remaining_actions': request.remaining_actions,
+                    'request_source_index': request_source_index,
+                    'current_source_index': source_index,
+                    'executed_since_request': executed_since_request,
+                    'request_active_index': request.active_index_at_request,
+                    'current_active_index': self.active_index,
+                    'source_hz': self.source_hz,
+                    'processed_hz': self.processed_hz,
+                    'original_actions_len': len(original_actions),
+                    'processed_actions_len': len(processed_actions),
+                }
                 return False
 
             if executed_since_request == clipped_prefix_len:
@@ -244,6 +269,14 @@ class ChunkScheduler:
                 self.pending_start_index = 0
                 self.pending_activation_index = None
                 self.pending_chunk_id = None
+                self._last_commit_debug = {
+                    'reason': 'accepted_replace_active',
+                    'request_prefix_len': request.prefix_len,
+                    'clipped_prefix_len': clipped_prefix_len,
+                    'executed_since_request': executed_since_request,
+                    'current_source_index': source_index,
+                    'active_index': self.active_index,
+                }
                 return True
 
             self.pending_original = original_actions.copy()
@@ -260,7 +293,21 @@ class ChunkScheduler:
                 request_source_index + clipped_prefix_len,
                 self.active_processed)
             self.pending_chunk_id = chunk_id
+            self._last_commit_debug = {
+                'reason': 'accepted_pending',
+                'request_prefix_len': request.prefix_len,
+                'clipped_prefix_len': clipped_prefix_len,
+                'executed_since_request': executed_since_request,
+                'request_source_index': request_source_index,
+                'current_source_index': source_index,
+                'pending_start_index': self.pending_start_index,
+                'pending_activation_index': self.pending_activation_index,
+            }
             return True
+
+    def last_commit_debug(self) -> dict:
+        with self.lock:
+            return dict(self._last_commit_debug)
 
     def cancel_inference_request(self) -> None:
         with self.lock:
@@ -556,10 +603,14 @@ class Teleop02WbtRTCInferenceRunner(Teleop02WbtInferenceRunner):
                         processed_base_pos=actor_base_pos,
                         processed_base_quat=actor_base_quat)
                     if not accepted:
+                        commit_debug = scheduler.last_commit_debug()
+                        debug_text = ', '.join(
+                           f'{key}={value}'
+                           for key, value in commit_debug.items())
                         overwatch.warning(
-                            f'[GET_ACTIONS] Dropping inferred chunk '
-                            f'{chunk_id} because the prefix window has '
-                            f'already passed')
+                           f'[GET_ACTIONS] Dropping inferred chunk '
+                           f'{chunk_id} because the prefix window has '
+                           f'already passed ({debug_text})')
                     else:
                         if not getattr(self, 'use_done_state_machine', True):
                             continue
@@ -647,12 +698,15 @@ class Teleop02WbtRTCInferenceRunner(Teleop02WbtInferenceRunner):
         inputs['rtc_config'] = self.rtc_config
 
     def _predict_action(self, inputs):
+        torch.cuda.synchronize() if torch.cuda.is_available() else None
         inference_start = time.perf_counter()
         raw_action = self.vla.predict_action(**inputs)
+        torch.cuda.synchronize() if torch.cuda.is_available() else None
         elapsed = time.perf_counter() - inference_start
-        print(f'Inference time: {elapsed:.3f}s', flush=True)
-        print(
-            f'Using prefix_len={inputs.get("prefix_len", "N/A")}', flush=True)
+        # print(f'Inference time: {elapsed:.3f}s', flush=True)
+        # print(
+        #     f'Using prefix_len={inputs.get("prefix_len", "N/A")}',
+        #     flush=True)
         return raw_action
 
     def _raw_action_to_numpy(self, raw_action) -> np.ndarray:
@@ -679,13 +733,14 @@ class Teleop02WbtRTCInferenceRunner(Teleop02WbtInferenceRunner):
 
                 if action is not None:
                     with self._action_lock:
+                        # print('actions:', action, flush=True)
                         if base_pos is not None and base_quat is not None:
                             self.ros_operator.send_action_absolute(
                                 action, base_pos, base_quat)
                         else:
                             self.ros_operator.send_action(action)
                     if chunk_id != last_chunk_id:
-                        overwatch.info(f'[ACTOR] Publishing chunk {chunk_id} '
+                        overwatch.info(f'[ACTOR] Sent chunk {chunk_id} '
                                        f'at action_count={action_count}')
                         last_chunk_id = chunk_id
                     action_count += 1
@@ -694,6 +749,13 @@ class Teleop02WbtRTCInferenceRunner(Teleop02WbtInferenceRunner):
                         stop_event.set()
 
                 elapsed = time.perf_counter() - start_time
+                if elapsed > actor_dt:
+                    overwatch.warning(
+                        f'[ACTOR] publish loop overrun '
+                        f'elapsed={elapsed * 1000.0:.2f} ms '
+                        f'budget={actor_dt * 1000.0:.2f} ms '
+                        f'action_count={action_count} '
+                        f'chunk_id={chunk_id}')
                 time.sleep(max(0.0, actor_dt - elapsed))
         except Exception as exc:
             overwatch.error(

@@ -357,6 +357,7 @@ class BaseInferenceRunner:
                                  and not self._use_remote)):
                     raw_action = self._predict_action(inputs)
                 actions = self._postprocess_actions(raw_action)
+                # print("actions:", actions)
                 self._execute_actions(actions, rate)
 
                 self._prev_ctx = self._action_ctx

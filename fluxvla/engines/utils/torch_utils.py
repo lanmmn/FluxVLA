@@ -19,6 +19,18 @@ from typing import Callable, Optional
 import numpy as np
 import torch
 
+
+def configure_inference_attention_defaults(
+        default_attn_implementation: str = 'flash_attention_2') -> str:
+    """Set default attention implementation for inference entrypoints."""
+    attn_impl = os.environ.get(
+        'ATTN_IMPLEMENTATION') or os.environ.get(
+            'TRANSFORMERS_ATTN_IMPLEMENTATION') or default_attn_implementation
+    os.environ.setdefault('ATTN_IMPLEMENTATION', attn_impl)
+    os.environ.setdefault('TRANSFORMERS_ATTN_IMPLEMENTATION', attn_impl)
+    return attn_impl
+
+
 # === Randomness ===
 
 

@@ -328,6 +328,7 @@ class Teleop02WbtOperator:
         # Trajectory thread state for async execution
         self._traj_thread = None
         self._traj_stop_event = threading.Event()
+        self._last_get_frame_warning_time = {}
 
         self._init_mros()
 
@@ -356,6 +357,13 @@ class Teleop02WbtOperator:
                                                    TeleopMsg, None)
         self.finger_publisher = mros.advertise(
             self.finger_cmd_topic, Float32Array, queue_size=10)
+        print(
+            '[mros] Teleop02WbtOperator subscribed to '
+            f'head={self.head_rgb_topic}, '
+            f'left_wrist={self.left_wrist_rgb_topic}, '
+            f'joint_state={self.joint_state_topic}, '
+            f'finger_state={self.finger_state_topic}',
+            flush=True)
 
     def _observation_hand_state(self):
         hand_state_dim = int(getattr(self, 'hand_state_dim', 2))
@@ -432,6 +440,7 @@ class Teleop02WbtOperator:
         self.last_finger_cmd = np.array(finger_cmd, dtype=np.float32)
         finger_msg = Float32Array()
         finger_msg.data = finger_cmd
+        # print('finger_cmd:', finger_cmd, flush=True)
         self.finger_publisher.publish(finger_msg)
 
     def _compressed_msg_to_numpy(self, msg):
@@ -475,6 +484,13 @@ class Teleop02WbtOperator:
             return None
         return image[:, :, ::-1].copy()
 
+    def _warn_get_frame_missing(self, key, message, interval=1.0):
+        now = time.monotonic()
+        last = self._last_get_frame_warning_time.get(key, 0.0)
+        if now - last >= interval:
+            print(message, flush=True)
+            self._last_get_frame_warning_time[key] = now
+
     def get_frame(self, timeout=0.05):
         """Get synchronized observation from all sensors.
 
@@ -496,12 +512,19 @@ class Teleop02WbtOperator:
         head_img = self._read_compressed_rgb_image(self.color_subscriber,
                                                    timeout)
         if head_img is None:
+            self._warn_get_frame_missing(
+                'head_img',
+                f'No head image received from {self.head_rgb_topic}')
             return False
 
         # (2) Read left wrist image
         left_wrist_img = self._read_compressed_rgb_image(
             self.left_wrist_color_subscriber, timeout)
         if left_wrist_img is None:
+            self._warn_get_frame_missing(
+                'left_wrist_img',
+                'No left wrist image received from '
+                f'{self.left_wrist_rgb_topic}')
             return False
 
         # (3) Read joint state
@@ -513,12 +536,18 @@ class Teleop02WbtOperator:
                 break
             time.sleep(0.005)
         if joint_state_msg is None:
-            print('No joint state message received')
+            self._warn_get_frame_missing(
+                'joint_state',
+                f'No joint state message received from '
+                f'{self.joint_state_topic}')
             return False
 
         joint_state = np.asarray(joint_state_msg.q, dtype=np.float32)
         if joint_state.size < 31:
-            print(f'Joint state size {joint_state.size} < 31')
+            self._warn_get_frame_missing(
+                'joint_state_size',
+                f'Joint state size {joint_state.size} < 31 from '
+                f'{self.joint_state_topic}')
             return False
         joint_state = joint_state[:31]
 
@@ -651,6 +680,7 @@ class Teleop02WbtOperator:
         teleop_msg.anchors = [
             self._make_keypoint('base_link', base_pos, base_quat_xyzw),
         ]
+        # print('teleop_wbt_msg:', teleop_msg, flush=True)
         self.teleop_wbt_publisher.publish(teleop_msg)
 
         finger_cmd = self._build_finger_cmd(
@@ -697,6 +727,7 @@ class Teleop02WbtOperator:
         teleop_msg.anchors = [
             self._make_keypoint('base_link', base_pos, base_quat_xyzw),
         ]
+        # print('teleop_wbt_msg:', teleop_msg, flush=True)
         self.teleop_wbt_publisher.publish(teleop_msg)
 
         # Sync accumulated state for potential fallback to delta mode
@@ -730,11 +761,11 @@ class Teleop02WbtOperator:
             running_flag_fn (callable, optional): Checked each step.
         """
         execute_start = time.perf_counter()
-        print(
-            f'[timing] operator_execute_trajectory_interpolated_start '
-            f'num_actions={len(actions)} '
-            f'source_hz={source_hz} target_hz={target_hz}',
-            flush=True)
+        # print(
+        #     f'[timing] operator_execute_trajectory_interpolated_start '
+        #     f'num_actions={len(actions)} '
+        #     f'source_hz={source_hz} target_hz={target_hz}',
+        #     flush=True)
 
         self.stop_trajectory()
         if self._traj_thread is not None:
@@ -748,11 +779,11 @@ class Teleop02WbtOperator:
                 actions, source_hz, target_hz, method=method,
                 init_base_pos=self._accum_base_pos.copy(),
                 init_base_yaw=self._accum_base_yaw)
-        print(
-            f'[timing] interpolation='
-            f'{(time.perf_counter() - interp_start) * 1000.0:.3f} ms '
-            f'output_steps={len(actions_interp)}',
-            flush=True)
+        # print(
+        #     f'[timing] interpolation='
+        #     f'{(time.perf_counter() - interp_start) * 1000.0:.3f} ms '
+        #     f'output_steps={len(actions_interp)}',
+        #     flush=True)
 
         dt_target = 1.0 / target_hz
 
@@ -769,10 +800,10 @@ class Teleop02WbtOperator:
                                           self._traj_stop_event,
                                           running_flag_fn)
 
-        print(
-            f'[timing] operator_execute_trajectory_interpolated_total='
-            f'{(time.perf_counter() - execute_start) * 1000.0:.3f} ms',
-            flush=True)
+        # print(
+        #     f'[timing] operator_execute_trajectory_interpolated_total='
+        #     f'{(time.perf_counter() - execute_start) * 1000.0:.3f} ms',
+        #     flush=True)
 
     def _run_trajectory_absolute(self, actions, base_pos, base_quat, dt,
                                  stop_event, running_flag_fn):
@@ -794,11 +825,11 @@ class Teleop02WbtOperator:
                 break
             self.send_action_absolute(actions[i], base_pos[i], base_quat[i])
             time.sleep(dt)
-        print(
-            f'[timing] operator_run_trajectory_absolute_total='
-            f'{(time.perf_counter() - trajectory_start) * 1000.0:.3f} ms '
-            f'num_actions={len(actions)}',
-            flush=True)
+        # print(
+        #     f'[timing] operator_run_trajectory_absolute_total='
+        #     f'{(time.perf_counter() - trajectory_start) * 1000.0:.3f} ms '
+        #     f'num_actions={len(actions)}',
+        #     flush=True)
 
     def execute_trajectory(self,
                            actions,
@@ -815,26 +846,26 @@ class Teleop02WbtOperator:
                 each step for graceful shutdown.
         """
         execute_start = time.perf_counter()
-        print(
-            f'[timing] operator_execute_trajectory_start '
-            f'num_actions={len(actions)} dt={dt:.6f} '
-            f'async_exec={async_exec}',
-            flush=True)
+        # print(
+        #     f'[timing] operator_execute_trajectory_start '
+        #     f'num_actions={len(actions)} dt={dt:.6f} '
+        #     f'async_exec={async_exec}',
+        #     flush=True)
 
         stop_start = time.perf_counter()
         self.stop_trajectory()
-        print(
-            f'[timing] operator_stop_trajectory='
-            f'{(time.perf_counter() - stop_start) * 1000.0:.3f} ms',
-            flush=True)
+        # print(
+        #     f'[timing] operator_stop_trajectory='
+        #     f'{(time.perf_counter() - stop_start) * 1000.0:.3f} ms',
+        #     flush=True)
         if self._traj_thread is not None:
             join_start = time.perf_counter()
             self._traj_thread.join(timeout=2.0)
-            print(
-                f'[timing] operator_join_previous_thread='
-                f'{(time.perf_counter() - join_start) * 1000.0:.3f} ms '
-                f'alive_after_join={self._traj_thread.is_alive()}',
-                flush=True)
+            # print(
+            #     f'[timing] operator_join_previous_thread='
+            #     f'{(time.perf_counter() - join_start) * 1000.0:.3f} ms '
+            #     f'alive_after_join={self._traj_thread.is_alive()}',
+            #     flush=True)
         self._traj_stop_event = threading.Event()
 
         if async_exec:
@@ -846,17 +877,17 @@ class Teleop02WbtOperator:
             self._traj_thread.start()
             start_thread_ms = (time.perf_counter() -
                                start_thread_start) * 1000.0
-            print(
-                f'[timing] operator_start_trajectory_thread='
-                f'{start_thread_ms:.3f} ms',
-                flush=True)
+            # print(
+            #     f'[timing] operator_start_trajectory_thread='
+            #     f'{start_thread_ms:.3f} ms',
+            #     flush=True)
         else:
             self._run_trajectory(actions, dt, self._traj_stop_event,
                                  running_flag_fn)
-        print(
-            f'[timing] operator_execute_trajectory_total='
-            f'{(time.perf_counter() - execute_start) * 1000.0:.3f} ms',
-            flush=True)
+        # print(
+        #     f'[timing] operator_execute_trajectory_total='
+        #     f'{(time.perf_counter() - execute_start) * 1000.0:.3f} ms',
+        #     flush=True)
 
     def _run_trajectory(self, actions, dt, stop_event, running_flag_fn):
         """Execute actions sequentially with rate control.
@@ -880,18 +911,18 @@ class Teleop02WbtOperator:
                 first_action_sent = True
                 since_start_ms = (time.perf_counter() -
                                   trajectory_start) * 1000.0
-                print(
-                    f'[timing] operator_first_send_action='
-                    f'{(time.perf_counter() - send_start) * 1000.0:.3f} ms '
-                    f'since_trajectory_start='
-                    f'{since_start_ms:.3f} ms',
-                    flush=True)
+                # print(
+                #     f'[timing] operator_first_send_action='
+                #     f'{(time.perf_counter() - send_start) * 1000.0:.3f} ms '
+                #     f'since_trajectory_start='
+                #     f'{since_start_ms:.3f} ms',
+                #     flush=True)
             time.sleep(dt)
-        print(
-            f'[timing] operator_run_trajectory_total='
-            f'{(time.perf_counter() - trajectory_start) * 1000.0:.3f} ms '
-            f'num_actions={len(actions)}',
-            flush=True)
+        # print(
+        #     f'[timing] operator_run_trajectory_total='
+        #     f'{(time.perf_counter() - trajectory_start) * 1000.0:.3f} ms '
+        #     f'num_actions={len(actions)}',
+        #     flush=True)
 
     def stop_trajectory(self):
         """Signal the background trajectory thread to stop."""
