@@ -438,10 +438,10 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
             get_frame_elapsed_ms = (time.perf_counter() -
                                     get_frame_start) * 1000.0
             if result is not False:
-                print(
-                    f'get_frame() elapsed: {get_frame_elapsed_ms:.3f} ms, '
-                    f'valid: True',
-                    flush=True)
+                # print(
+                #     f'get_frame() elapsed: {get_frame_elapsed_ms:.3f} ms, '
+                #     f'valid: True',
+                #     flush=True)
                 return result
             now = time.monotonic()
             if now - last_wait_print > 2.0:
@@ -499,17 +499,17 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
             for camera_name in self.camera_names:
                 dummy_obs[camera_name] = None
             self.observation_window.append(dummy_obs)
-            print(
-                f'[timing] observation_window_init='
-                f'{(time.perf_counter() - window_init_start) * 1000.0:.3f} ms',
-                flush=True)
+            # print(
+            #     f'[timing] observation_window_init='
+            #     f'{(time.perf_counter() - window_init_start) * 1000.0:.3f} ms',
+            #     flush=True)
 
         stage_start = time.perf_counter()
         result = self.get_ros_observation()
-        print(
-            f'[timing] get_ros_observation_total='
-            f'{(time.perf_counter() - stage_start) * 1000.0:.3f} ms',
-            flush=True)
+        # print(
+        #     f'[timing] get_ros_observation_total='
+        #     f'{(time.perf_counter() - stage_start) * 1000.0:.3f} ms',
+        #     flush=True)
         if result is None:
             return self.observation_window[-1]
 
@@ -523,10 +523,10 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
         debug_images = {'head': head_img, 'left_wrist': left_wrist_img}
 
         self._dump_debug_jpeg_images(debug_images)
-        print(
-            f'[timing] jpeg_compression='
-            f'{(time.perf_counter() - stage_start) * 1000.0:.3f} ms',
-            flush=True)
+        # print(
+        #     f'[timing] jpeg_compression='
+        #     f'{(time.perf_counter() - stage_start) * 1000.0:.3f} ms',
+        #     flush=True)
 
         observation = {
             'qpos': state,
@@ -541,30 +541,32 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
         """Observe environment and build model inputs with timing logs."""
         stage_start = time.perf_counter()
         obs = self.update_observation_window()
-        print(
-            f'[timing] update_observation_window='
-            f'{(time.perf_counter() - stage_start) * 1000.0:.3f} ms',
-            flush=True)
+        # print(
+        #     f'[timing] update_observation_window='
+        #     f'{(time.perf_counter() - stage_start) * 1000.0:.3f} ms',
+        #     flush=True)
 
         obs['task_description'] = instruction
 
         stage_start = time.perf_counter()
         inputs = self.dataset(obs)
-        print(
-            f'[timing] dataset_transform='
-            f'{(time.perf_counter() - stage_start) * 1000.0:.3f} ms',
-            flush=True)
+        # print(
+        #     f'[timing] dataset_transform='
+        #     f'{(time.perf_counter() - stage_start) * 1000.0:.3f} ms',
+        #     flush=True)
         return inputs
 
     def _predict_action(self, inputs):
         """Run model inference with timing instrumentation."""
         self._action_ctx.inference_start = time.time()
+        torch.cuda.synchronize() if torch.cuda.is_available() else None
         predict_start = time.perf_counter()
         raw_action = self.vla.predict_action(**inputs)
-        print(
-            f'[timing] vla_predict_call_returned='
-            f'{(time.perf_counter() - predict_start) * 1000.0:.3f} ms',
-            flush=True)
+        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        # print(
+        #     f'[timing] vla_predict_call_returned='
+        #     f'{(time.perf_counter() - predict_start) * 1000.0:.3f} ms',
+        #     flush=True)
         return raw_action
 
     def _postprocess_actions(self, raw_action):
@@ -602,6 +604,7 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
             if self.execute_horizon is not None:
                 actions = actions[:self.execute_horizon]
 
+        # print('actions:', actions, flush=True)
         # Use interpolated execution if target_hz differs from model rate
         if (self.target_hz is not None
                 and self.target_hz != self.publish_rate):
