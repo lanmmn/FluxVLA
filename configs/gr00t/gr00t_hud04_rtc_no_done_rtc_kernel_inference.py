@@ -38,53 +38,12 @@ train_dataloader = _deepcopy(_base_globals['train_dataloader'])
 runner = _deepcopy(_base_globals['runner'])
 inference = _deepcopy(_base_globals['inference'])
 
-# prefix=0
-# inference['async_execution'] = False
-# inference['rtc_config']['prefix_len'] = 0
-# inference['execute_horizon'] = 12
-# inference['target_hz'] = 50
-
-# temp
+# RTC specific configs
 inference['publish_rate'] = 30
 inference['async_remaining_actions_threshold'] = 8
 inference['execute_horizon'] = 16
 inference['target_hz'] = 50
 inference['rtc_config']['prefix_len'] = 7
-
-
-# denoise step = 2 能抓, 但很抖
-# inference['publish_rate'] = 18
-# inference['async_remaining_actions_threshold'] = 8
-# inference['execute_horizon'] = 20
-# inference['target_hz'] = 50
-# inference['rtc_config']['prefix_len'] = 5
-
-# inference['publish_rate'] = 16
-# inference['target_hz'] = 50
-# inference['async_remaining_actions_threshold'] = 8
-# inference['execute_horizon'] = 18
-# inference['rtc_config']['prefix_len'] = 5
-
-
-# inference['async_remaining_actions_threshold'] = 7
-# inference['execute_horizon'] = 15
-# inference['target_hz'] = 50
-# inference['rtc_config']['prefix_len'] = 7
-# 能抓，但有点飘
-
-
-# gr00t 4090d
-#    async_remaining_actions_threshold=6,
-#    execute_horizon=16,
-#    prefix=4
-
-# best
-# inference['async_remaining_actions_threshold'] = 9
-# inference['execute_horizon'] = 20
-# inference['target_hz'] = 50
-# inference['rtc_config']['prefix_len'] = 7 
-
-
 
 inference_model = _deepcopy(_base_globals['inference_model'])
 inference_model['vlm_backbone']['type'] = 'EagleInferenceBackbone'
@@ -102,6 +61,8 @@ inference_model['vla_head']['diffusion_model_cfg'] = dict(
     output_dim=1024,
     positional_embeddings=None,
 )
+# Adjust denoise step for faster inference, setting num_inference_timesteps to 2. 
+# Compare to Origin num_inference_timesteps is 4.
 inference_model['vla_head']['num_inference_timesteps'] = 2
 
 del _base_candidates, _base_globals, _base_path, _deepcopy, _Path
