@@ -28,6 +28,7 @@ from safetensors.torch import save_file
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers.modeling_outputs import CausalLMOutputWithPast
+from torch.profiler import record_function
 
 from fluxvla.engines.utils import check_bloat16_supported
 from fluxvla.engines.utils.name_map import str_to_dtype
@@ -859,23 +860,26 @@ class BaseTrainRunner(ABC):
     def _training_step(self, batch, should_step: bool = True) -> torch.Tensor:
         """Execute single training step: forward, backward, optimize."""
         self.lr_scheduler.prepare_step(self)
-        batch = self._prepare_batch(
-            batch, self.device_id, self.mixed_precision_dtype
-            if self.enable_mixed_precision_training else None)
+        with record_function("train/prepare_batch"):
+            batch = self._prepare_batch(
+                batch, self.device_id, self.mixed_precision_dtype
+                if self.enable_mixed_precision_training else None)
         if ('sample_weight' in batch
                 and not self._vla_accepts_kwarg('sample_weight')):
             batch = dict(batch)
             batch.pop('sample_weight')
-        with torch.autocast(
-                'cuda',
-                dtype=self.mixed_precision_dtype,
-                enabled=self.enable_mixed_precision_training):
-            output: CausalLMOutputWithPast = self.vla(**batch)
-            loss = output['loss']
+        with record_function("train/forward"):
+            with torch.autocast(
+                    'cuda',
+                    dtype=self.mixed_precision_dtype,
+                    enabled=self.enable_mixed_precision_training):
+                output: CausalLMOutputWithPast = self.vla(**batch)
+                loss = output['loss']
             loss_metrics = self._collect_output_loss_metrics(output)
 
         self.metric.commit(loss=loss, **loss_metrics)
-        (loss / self.grad_accumulation_steps).backward()
+        with record_function("train/backward"):
+            (loss / self.grad_accumulation_steps).backward()
 
         # Commit per-dataset metrics
         if overwatch.is_rank_zero() and all(k in output for k in [
@@ -889,19 +893,19 @@ class BaseTrainRunner(ABC):
 
         if not should_step:
             return loss.detach()
-
-        # Gradient step with fallback on optimizer state mismatch
-        self.clip_grad_norm()
-        try:
-            self.optimizer.step()
-        except RuntimeError as e:
-            if 'size' in str(e).lower() or 'shape' in str(e).lower():
-                self._reinit_optimizer()
+        with record_function("train/optimizer_step"):
+            # Gradient step with fallback on optimizer state mismatch
+            self.clip_grad_norm()
+            try:
                 self.optimizer.step()
-            else:
-                raise
-        self.lr_scheduler.step(self)
-        self.optimizer.zero_grad()
+            except RuntimeError as e:
+                if 'size' in str(e).lower() or 'shape' in str(e).lower():
+                    self._reinit_optimizer()
+                    self.optimizer.step()
+                else:
+                    raise
+            self.lr_scheduler.step(self)
+            self.optimizer.zero_grad()
 
         # Custom hook for subclasses
         if hasattr(self, '_custom_training_step'):
