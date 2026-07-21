@@ -185,6 +185,23 @@ This check exposed and fixed a mask-alignment bug in the first implementation:
 after reducing 16 view-major temporal frames to two current Qwen images, the
 transform must also reduce `img_masks` from 16 entries to two.
 
+The evaluation-only transform chain was also executed against a synthetic
+LIBERO observation using the tokenizer and statistics saved by the 10-step
+checkpoint. It produced finite state `[8]`, Qwen pixels `[512, 1536]`, image
+grid `[2, 3]`, and language arrays `[128]`. The restored token IDs occurred
+`8/8/8/32` times for world-action 0/1/2 and embodied-action respectively, so
+the rollout input contract matches training without invoking the world model.
+
+The full inference model was then rebuilt on CPU and loaded from the actual
+10-step safetensors checkpoint: all 1,617 tensors matched with zero missing and
+zero unexpected keys. A real Qwen-plus-action-head `predict_action` call on the
+synthetic observation returned finite FP32 actions with shape `[1, 7, 7]`.
+Both V-JEPA modules were replaced with call-failing sentinels for this check;
+neither sentinel fired, directly verifying that rollout inference skips the
+world model. The CPU-only harness explicitly cast the action head and state to
+BF16 to mirror `LiberoEvalRunner.run_setup()`, which casts the complete model
+before normal GPU inference.
+
 Environment snapshot during implementation:
 
 - The mounted LIBERO-10 dataset is readable and contains 388 parquet files,

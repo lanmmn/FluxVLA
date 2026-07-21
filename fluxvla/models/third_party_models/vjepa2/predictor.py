@@ -204,4 +204,3 @@ def vit_ac_predictor(**kwargs):
         **kwargs
     )
     return model
-
