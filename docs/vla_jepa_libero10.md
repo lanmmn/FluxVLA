@@ -88,6 +88,25 @@ hf download limxdynamics/FluxVLAData \
 The V-JEPA2 include rule intentionally excludes the unused 4.8 GiB original
 PyTorch checkpoint because Transformers loads `model.safetensors`.
 
+LIBERO simulation uses the commits pinned by `requirements-sim.txt`. The
+validated environment has robosuite 1.5.1 from `e293cc3` and an editable
+LIBERO checkout at `058fda1` so scene XML and other assets remain available.
+The preferred installation command is:
+
+```bash
+bash scripts/install_env.sh sim-only
+```
+
+On this host, an older editable LIBERO checkout and stale `~/.libero` paths
+were already present. The isolated runtime used for validation is:
+
+```text
+LIBERO_CONFIG_PATH=/limx_embop/tos/limx_mani_data/fluxvla_work_dirs/libero_runtime_config
+LIBERO source=/limx_embop/tos/limx_mani_data/fluxvla_work_dirs/libero_runtime_src/libero
+robosuite commit=e293cc32ff3c48957a4ebcad09952432b0dc9049
+LIBERO commit=058fda1ddebe92918af091cb6816759ca6d003f0
+```
+
 ## Reproduction Commands
 
 Formal 8-GPU training:
@@ -126,7 +145,8 @@ WANDB_MODE=disabled torchrun --standalone --nnodes 1 --nproc-per-node 8 \
 One rollout for every LIBERO-10 task:
 
 ```bash
-WANDB_MODE=disabled torchrun --standalone --nnodes 1 --nproc-per-node 8 \
+LIBERO_CONFIG_PATH=/limx_embop/tos/limx_mani_data/fluxvla_work_dirs/libero_runtime_config \
+  WANDB_MODE=disabled torchrun --standalone --nnodes 1 --nproc-per-node 8 \
   scripts/eval.py \
   --config configs/vla_jepa/vla_jepa_qwen3vl_2b_libero_10_finetune.py \
   --ckpt-path \
@@ -270,35 +290,63 @@ checkpoint validates complete state restoration but is not a meaningful
 learning-continuation experiment. Formal training retains the intended
 30,000-step schedule and 5,000-step warm-up.
 
-### Remaining validation sequence
+### Eight-GPU resume milestone
 
-The required runtime sequence is:
+The complete 10-step `.pt` was resumed after the external GPU job ended. FSDP
+reported successful restoration of model, optimizer, and scheduler state and
+started at `global_step=10`, epoch 0. Steps 11-20 completed without OOM or
+non-finite values:
 
-1. Resume the complete 10-step checkpoint and continue through step 20.
-2. Run one rollout for each of the ten LIBERO-10 tasks.
+```text
+joint loss: 2.3147, 2.1565, 2.0635, 2.0970, 2.4507,
+            2.0879, 2.1099, 1.9603, 1.9800, 2.1553
+wm loss:    1.8300 -> 1.7980
+```
 
-The resume source was inspected with memory-mapped `torch.load`: it records
-`global_step=10`, epoch 0, 1,029 optimizer parameter states in two parameter
-groups, and scheduler `last_epoch=10`. Thus the remaining resume check starts
-from a complete training checkpoint rather than the model-only export.
+The interval mean joint loss was `2.1376`. Memory-mapped inspection of the new
+checkpoint confirms `global_step=20`, epoch 0, 1,617 model tensors, 1,029
+optimizer states, and scheduler `last_epoch=20`:
 
-As of 2026-07-21 10:16 UTC, an unrelated DreamZero run held approximately
-59.4-61.6 GiB on every A100, while this recipe's measured peak is 61.6 GiB per
-GPU. The other run was still at epoch 0, step 449; an earlier run of the same
-recipe reached step 8,073 without leaving epoch 0, so this is not a short
-checkpoint-save interval. A 30-second polling queue was stopped to avoid an
-unattended 8-GPU launch at an unsafe future time. No external process was
-stopped. Resume-to-20 and the ten simulator rollouts are therefore explicitly
-not reported as passed yet; the commands above are ready for the next free
-8-GPU window.
+```text
+/limx_embop/tos/limx_mani_data/fluxvla_work_dirs/vla_jepa_libero10_smoke/checkpoints/step-000020-epoch-00-loss=2.1376.pt
+/limx_embop/tos/limx_mani_data/fluxvla_work_dirs/vla_jepa_libero10_smoke/checkpoints/step-000020-epoch-00-loss=2.1376.safetensors
+```
 
-Environment constraints such as unavailable GPUs, datasets, simulator assets,
-or pretrained checkpoints are recorded with the exact probe and command rather
-than reported as successful validation.
+Their sizes are 31,874,199,790 and 12,321,890,692 bytes respectively, and both
+`latest-checkpoint` symlinks resolve to step 20. As expected from the shortened
+smoke schedule, step 10 restored at zero LR; the newly constructed 20-step
+cosine schedule then continued from step 11. This does not affect the formal
+30,000-step schedule.
+
+### LIBERO-10 rollout milestone
+
+The first simulator launch correctly rejected the pre-existing
+`robosuite==1.4.1`. Installing the commits pinned by `requirements-sim.txt`
+revealed two additional host-specific issues: the old editable LIBERO checkout
+lacked robosuite 1.5 robot fields, and a non-editable wheel omitted scene XML
+assets. The final fix uses robosuite 1.5.1 plus an isolated editable LIBERO
+checkout and `LIBERO_CONFIG_PATH`. A task-0 environment probe successfully ran
+reset, fixed initial-state loading, and one dummy step before the full launch.
+
+The 8-rank evaluation completed exactly one rollout for each task: 10/10
+episodes completed, 0/10 succeeded, per-task time was 25.91-29.72 seconds, and
+the summed task time was 278.09 seconds. This run is a functional smoke test;
+the zero success rate after only 20 optimizer steps is not an acceptance
+failure. Summary JSON, per-task JSON, eight rank logs, and ten rollout videos
+are under:
+
+```text
+/limx_embop/tos/limx_mani_data/fluxvla_work_dirs/vla_jepa_libero10_smoke/eval_runs/step-000020-epoch-00-loss=2.1376/EVAL-libero_10-vla_jepa-2026_07_21-13_11_55
+```
+
+All first-round runtime acceptance items are now complete. Remaining warnings
+are upstream deprecations, optional robosuite robot packages not used by Panda
+OSC control, missing optional OpenGL acceleration, and the existing process
+group shutdown warning.
 
 ## Review Boundary
 
-The first review covers the native LIBERO-10 implementation and the validation
-that the available environment can execute. It does not cover full 30k-step
-convergence, 50-rollout benchmark statistics, human-video co-training, or
-published VLA-JEPA checkpoint compatibility.
+The first review covers the native LIBERO-10 implementation and all four smoke
+validation milestones. It does not cover full 30k-step convergence, 50-rollout
+benchmark statistics, human-video co-training, or published VLA-JEPA
+checkpoint compatibility.
