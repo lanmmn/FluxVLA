@@ -36,6 +36,7 @@ class PretrainedTokenizer:
         model_max_length: int = 2048,
         padding_side: str = 'right',
         trust_remote_code: bool = True,
+        additional_special_tokens: Optional[List[str]] = None,
     ) -> None:
         """Load tokenizer from a path or repo id and record the original argument."""  # noqa: E501
         # Avoid top-level import to reduce environment constraints
@@ -47,6 +48,13 @@ class PretrainedTokenizer:
             padding_side=padding_side,
             trust_remote_code=trust_remote_code,
         )
+        self.additional_special_tokens = list(additional_special_tokens or [])
+        if len(set(self.additional_special_tokens)) != len(
+                self.additional_special_tokens):
+            raise ValueError('additional_special_tokens must be unique')
+        if self.additional_special_tokens:
+            self.tokenizer.add_special_tokens(
+                {'additional_special_tokens': self.additional_special_tokens})
         self.model_path = model_path  # Keep original argument for source resolution  # noqa: E501
         self.copy_attrs_from_obj()
 
@@ -66,6 +74,9 @@ class PretrainedTokenizer:
 
     def encode(self, *args, **kwargs):
         return self.tokenizer.encode(*args, **kwargs)
+
+    def convert_tokens_to_ids(self, tokens):
+        return self.tokenizer.convert_tokens_to_ids(tokens)
 
     # ---------------- New implementation begins ----------------
 
@@ -245,6 +256,12 @@ class PretrainedTokenizer:
         ]):
             # Neither source copy nor fallback produced a core vocabulary file;
             # export the full tokenizer to the target directory.
+            self.tokenizer.save_pretrained(dst.as_posix())
+
+        # Added tokens live in tokenizer metadata rather than the original
+        # vocabulary files. Always export the in-memory tokenizer so they
+        # survive checkpoint save/reload.
+        if self.additional_special_tokens:
             self.tokenizer.save_pretrained(dst.as_posix())
 
         print(f'Tokenizers saved to: {dst.resolve()}')

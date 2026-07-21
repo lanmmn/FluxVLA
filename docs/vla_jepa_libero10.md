@@ -71,8 +71,39 @@ paths without reconstructing them from commits.
 
 ## Validation Record
 
-Validation evidence will be appended here in the same commits as the tested
-implementation. The required sequence is:
+### Core component milestone
+
+Implemented the registered VLA, single-embodiment action head, tokenizer
+extension, prompt/video transforms, and action-conditioned predictor.
+
+Key technical details:
+
+- The predictor implementation is carried under its own MIT license and keeps
+  the source causal attention mask and RoPE behavior.
+- The tokenizer adds three unique world-action tokens and one embodied-action
+  token. The prompt contains 24 world-token occurrences (eight for each latent
+  transition) and 32 embodied-token occurrences.
+- `VLAJEPA` resizes Qwen's input embeddings before checkpoint loading and
+  validates the token counts before gathering hidden states.
+- View features are reshaped as `[B, V, N, D]` before concatenation, avoiding
+  cross-sample mixing when `B > 1`.
+- World loss compares three predicted latent transitions against latent frames
+  1-3 and becomes a differentiable zero when no sample has a complete
+  eight-frame window.
+
+Executed:
+
+```bash
+pytest -q test/test_models/test_vla_jepa.py
+```
+
+Result: `6 passed`. The two warnings are upstream deprecations from timm's
+legacy import path and PyTorch's legacy SDPA context manager; neither changes
+the tested result.
+
+### Remaining validation sequence
+
+The required runtime sequence is:
 
 1. Focused unit tests for tokens, prompt/video transforms, action head,
    predictor masking, and joint loss.

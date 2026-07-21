@@ -23,3 +23,4 @@ from .transform_actions import *  # noqa: F401, F403
 from .transform_images import *  # noqa: F401, F403
 from .transform_inputs import *  # noqa: F401, F403
 from .transform_prompts import *  # noqa: F401, F403
+from .vla_jepa import *  # noqa: F401, F403
