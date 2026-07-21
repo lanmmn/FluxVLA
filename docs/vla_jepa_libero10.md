@@ -277,6 +277,21 @@ The required runtime sequence is:
 1. Resume the complete 10-step checkpoint and continue through step 20.
 2. Run one rollout for each of the ten LIBERO-10 tasks.
 
+The resume source was inspected with memory-mapped `torch.load`: it records
+`global_step=10`, epoch 0, 1,029 optimizer parameter states in two parameter
+groups, and scheduler `last_epoch=10`. Thus the remaining resume check starts
+from a complete training checkpoint rather than the model-only export.
+
+As of 2026-07-21 10:16 UTC, an unrelated DreamZero run held approximately
+59.4-61.6 GiB on every A100, while this recipe's measured peak is 61.6 GiB per
+GPU. The other run was still at epoch 0, step 449; an earlier run of the same
+recipe reached step 8,073 without leaving epoch 0, so this is not a short
+checkpoint-save interval. A 30-second polling queue was stopped to avoid an
+unattended 8-GPU launch at an unsafe future time. No external process was
+stopped. Resume-to-20 and the ten simulator rollouts are therefore explicitly
+not reported as passed yet; the commands above are ready for the next free
+8-GPU window.
+
 Environment constraints such as unavailable GPUs, datasets, simulator assets,
 or pretrained checkpoints are recorded with the exact probe and command rather
 than reported as successful validation.
