@@ -105,7 +105,8 @@ Ten-step smoke run and checkpoint creation:
 WANDB_MODE=disabled torchrun --standalone --nnodes 1 --nproc-per-node 8 \
   scripts/train.py \
   --config configs/vla_jepa/vla_jepa_qwen3vl_2b_libero_10_finetune.py \
-  --work-dir work_dirs/vla_jepa_libero10_smoke \
+  --work-dir \
+  /limx_embop/tos/limx_mani_data/fluxvla_work_dirs/vla_jepa_libero10_smoke \
   --cfg-options runner.max_steps=10 runner.save_iter_interval=10
 ```
 
@@ -115,9 +116,10 @@ Resume the same run through step 20:
 WANDB_MODE=disabled torchrun --standalone --nnodes 1 --nproc-per-node 8 \
   scripts/train.py \
   --config configs/vla_jepa/vla_jepa_qwen3vl_2b_libero_10_finetune.py \
-  --work-dir work_dirs/vla_jepa_libero10_smoke \
+  --work-dir \
+  /limx_embop/tos/limx_mani_data/fluxvla_work_dirs/vla_jepa_libero10_smoke \
   --resume-from \
-  work_dirs/vla_jepa_libero10_smoke/checkpoints/latest-checkpoint.pt \
+  /limx_embop/tos/limx_mani_data/fluxvla_work_dirs/vla_jepa_libero10_smoke/checkpoints/latest-checkpoint.pt \
   --cfg-options runner.max_steps=20 runner.save_iter_interval=10
 ```
 
@@ -128,7 +130,7 @@ WANDB_MODE=disabled torchrun --standalone --nnodes 1 --nproc-per-node 8 \
   scripts/eval.py \
   --config configs/vla_jepa/vla_jepa_qwen3vl_2b_libero_10_finetune.py \
   --ckpt-path \
-  work_dirs/vla_jepa_libero10_smoke/checkpoints/latest-checkpoint.pt \
+  /limx_embop/tos/limx_mani_data/fluxvla_work_dirs/vla_jepa_libero10_smoke/checkpoints/latest-checkpoint.safetensors \
   --cfg-options eval.num_trials_per_task=1
 ```
 
@@ -187,19 +189,76 @@ Environment snapshot during implementation:
 
 - The mounted LIBERO-10 dataset is readable and contains 388 parquet files,
   776 videos, and the required v2.1 metadata.
-- Eight A100 80 GB GPUs are present, but unrelated running jobs currently
-  leave only approximately 19-22 GiB free on each GPU. No process was stopped
-  or modified by this work.
+- Eight A100 80 GB GPUs are present. They became free long enough to complete
+  the batch-1 and 8-GPU smoke milestones; later an unrelated host-namespace
+  job occupied the GPUs again. No unrelated process was stopped or modified.
+
+### Batch-1 forward/backward milestone
+
+Executed one complete forward, backward, optimizer, scheduler, and checkpoint
+step on one GPU with per-device batch one. The finite joint loss was `3.0081`.
+
+```bash
+CUDA_VISIBLE_DEVICES=0 WANDB_MODE=disabled torchrun --standalone \
+  --nnodes 1 --nproc-per-node 1 scripts/train.py \
+  --config configs/vla_jepa/vla_jepa_qwen3vl_2b_libero_10_finetune.py \
+  --work-dir work_dirs/vla_jepa_libero10_batch1 \
+  --cfg-options train_dataloader.per_device_batch_size=1 \
+  train_dataloader.per_device_num_workers=0 \
+  runner.grad_accumulation_steps=1 runner.max_steps=1 \
+  runner.save_iter_interval=1
+```
+
+The training step and `.pt` save completed, proving that the optimizer state is
+serializable. Saving the second, model-only safetensors copy then exhausted the
+root filesystem. The valid `.pt` was checked with `torch.load(..., mmap=True)`:
+it contains `global_step=1`, 1,617 model tensors, optimizer state, and scheduler
+state. The run was moved to:
+
+```text
+/limx_embop/tos/limx_mani_data/fluxvla_work_dirs/vla_jepa_libero10_batch1
+```
+
+All subsequent smoke checkpoints use the NAS path because a step checkpoint
+requires approximately 30 GiB for `.pt` plus 12 GiB for `.safetensors`.
+
+### Eight-GPU 10-step milestone
+
+The default batch topology ran as configured: per-device batch 4, eight GPUs,
+and gradient accumulation 8, for global batch 256. FSDP full-shard BF16 used a
+maximum of approximately 61.6 GiB on the most-loaded GPU. Steps 1-10 completed
+without OOM or non-finite losses:
+
+```text
+joint loss: 2.4006, 2.1272, 2.5460, 2.1451, 2.4354,
+            2.2014, 2.3616, 2.0054, 2.0032, 2.1987
+wm loss:    1.9770 -> 1.8245
+```
+
+The interval mean joint loss was `2.2425`. Both FluxVLA checkpoint forms were
+written successfully:
+
+```text
+/limx_embop/tos/limx_mani_data/fluxvla_work_dirs/vla_jepa_libero10_smoke/checkpoints/step-000010-epoch-00-loss=2.2425.pt
+/limx_embop/tos/limx_mani_data/fluxvla_work_dirs/vla_jepa_libero10_smoke/checkpoints/step-000010-epoch-00-loss=2.2425.safetensors
+```
+
+The `.pt` is 31,874,199,790 bytes and includes optimizer/scheduler state; the
+model-only safetensors file is 12,321,890,692 bytes. The only process-exit
+warning was PyTorch's existing `destroy_process_group()` warning.
+
+The ten-step smoke override necessarily compresses the formal cosine schedule
+to ten steps, so its learning rate reaches zero at step 10. Resuming this exact
+checkpoint validates complete state restoration but is not a meaningful
+learning-continuation experiment. Formal training retains the intended
+30,000-step schedule and 5,000-step warm-up.
 
 ### Remaining validation sequence
 
 The required runtime sequence is:
 
-1. Focused unit tests for tokens, prompt/video transforms, action head,
-   predictor masking, and joint loss.
-2. Batch-1 forward/backward validation.
-3. Eight-GPU steps 0-10, checkpoint save, resume, and continuation to step 20.
-4. One rollout for each of the ten LIBERO-10 tasks.
+1. Resume the complete 10-step checkpoint and continue through step 20.
+2. Run one rollout for each of the ten LIBERO-10 tasks.
 
 Environment constraints such as unavailable GPUs, datasets, simulator assets,
 or pretrained checkpoints are recorded with the exact probe and command rather
