@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+from mmengine import Config
 
 from fluxvla.models.heads import VLAJEPAFlowMatchingHead
 from fluxvla.models.third_party_models.vjepa2 import \
@@ -69,6 +70,26 @@ class _JointLossHarness(VLAJEPA):
         return pixel_values_videos.sum() * 0 + 3.0
 
 
+class _ZeroWorldPredictor(nn.Module):
+
+    def forward(self, context, world_features):
+        return context * 0
+
+
+class _WorldLossHarness(VLAJEPA):
+
+    def __init__(self, latents):
+        nn.Module.__init__(self)
+        self.num_frames = 4
+        self.latent_frames = 2
+        self.num_world_steps = 1
+        self.world_predictor = _ZeroWorldPredictor()
+        self.register_buffer('latents', latents)
+
+    def _encode_video(self, pixel_values_videos):
+        return self.latents
+
+
 class TestVLAJEPATransforms(unittest.TestCase):
 
     def test_prompt_token_counts(self):
@@ -97,11 +118,15 @@ class TestVLAJEPATransforms(unittest.TestCase):
             for frame in range(8):
                 images.append(
                     np.full((3, 4, 4), view * 100 + frame, dtype=np.uint8))
-        result = transform({'images': images})
+        result = transform({
+            'images': images,
+            'img_masks': np.ones(16, dtype=np.bool_),
+        })
         self.assertEqual(len(result['images']), 2)
         self.assertEqual(int(result['images'][0][0, 0, 0]), 0)
         self.assertEqual(int(result['images'][1][0, 0, 0]), 100)
         self.assertEqual(result['pixel_values_videos'].shape, (2, 8, 3, 4, 4))
+        self.assertEqual(result['img_masks'].shape, (2, ))
         self.assertEqual(
             int(result['pixel_values_videos'][1, 7, 0, 0, 0]), 107)
 
@@ -216,6 +241,39 @@ class TestVLAJEPAComposition(unittest.TestCase):
         self.assertAlmostEqual(output['loss'].item(), 2.3, places=6)
         self.assertAlmostEqual(output['action_loss'].item(), 2.0, places=6)
         self.assertAlmostEqual(output['wm_loss'].item(), 3.0, places=6)
+
+    def test_incomplete_video_window_is_excluded_from_world_loss(self):
+        latents = torch.tensor([
+            [[0.0], [0.0], [1.0], [1.0]],
+            [[0.0], [0.0], [9.0], [9.0]],
+        ])
+        model = _WorldLossHarness(latents)
+        frame_masks = torch.tensor([
+            [1, 1, 1, 1],
+            [1, 1, 1, 0],
+        ])
+        loss = model._world_model_loss(
+            world_features=torch.zeros(2, 2, 3),
+            pixel_values_videos=torch.zeros(2, 2, 4, 3, 2, 2),
+            frame_masks=frame_masks,
+        )
+        self.assertEqual(loss.item(), 1.0)
+
+
+class TestVLAJEPAConfig(unittest.TestCase):
+
+    def test_libero10_recipe(self):
+        cfg = Config.fromfile('configs/vla_jepa/'
+                              'vla_jepa_qwen3vl_2b_libero_10_finetune.py')
+        self.assertEqual(cfg.model.type, 'VLAJEPA')
+        self.assertEqual(cfg.train_dataloader.per_device_batch_size, 4)
+        self.assertEqual(
+            cfg.train_dataloader.dataset.datasets.frame_window_size, 8)
+        self.assertEqual(
+            cfg.train_dataloader.dataset.datasets.action_window_size, 7)
+        self.assertEqual(cfg.runner.grad_accumulation_steps, 8)
+        self.assertEqual(cfg.eval.task_suite_name, 'libero_10')
+        self.assertEqual(cfg.eval.norm_stats_key, 'libero_10_no_noops')
 
 
 if __name__ == '__main__':

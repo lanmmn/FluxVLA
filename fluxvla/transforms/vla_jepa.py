@@ -142,15 +142,25 @@ class PrepareVLAJEPAVideo:
         if len(images) != expected:
             raise ValueError(
                 f'Expected {expected} view-major frames, got {len(images)}')
+        image_masks = inputs.get('img_masks')
+        if image_masks is not None and len(image_masks) != expected:
+            raise ValueError(
+                f'Expected {expected} view-major image masks, got '
+                f'{len(image_masks)}')
 
         videos = []
         current_images = []
+        current_masks = []
         for view in range(self.num_views):
             start = view * self.num_frames
             view_images = images[start:start + self.num_frames]
             current_images.append(view_images[0])
+            if image_masks is not None:
+                current_masks.append(image_masks[start])
             videos.append(self._process_view(view_images))
 
         inputs['images'] = current_images
+        if image_masks is not None:
+            inputs['img_masks'] = np.asarray(current_masks, dtype=np.bool_)
         inputs['pixel_values_videos'] = torch.stack(videos, dim=0)
         return inputs

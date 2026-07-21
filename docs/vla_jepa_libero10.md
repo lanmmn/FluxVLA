@@ -69,6 +69,69 @@ paths without reconstructing them from commits.
   `1e-4`; V-JEPA2 encoder frozen.
 - Dataset root: `datasets/libero_10_no_noops_lerobotv2.1`.
 
+## Environment Preparation
+
+The current Hugging Face client uses `hf`; the deprecated
+`huggingface-cli download` command exits without downloading.
+
+```bash
+hf download Qwen/Qwen3-VL-2B-Instruct \
+  --include '*.json' --include '*.txt' --include '*.safetensors'
+hf download facebook/vjepa2-vitl-fpc64-256 \
+  --include '*.json' --include '*.safetensors'
+hf download limxdynamics/FluxVLAData \
+  --repo-type dataset \
+  --include 'libero_10_no_noops_lerobotv2.1/*' \
+  --local-dir datasets
+```
+
+The V-JEPA2 include rule intentionally excludes the unused 4.8 GiB original
+PyTorch checkpoint because Transformers loads `model.safetensors`.
+
+## Reproduction Commands
+
+Formal 8-GPU training:
+
+```bash
+WANDB_MODE=disabled torchrun --standalone --nnodes 1 --nproc-per-node 8 \
+  scripts/train.py \
+  --config configs/vla_jepa/vla_jepa_qwen3vl_2b_libero_10_finetune.py \
+  --work-dir work_dirs/vla_jepa_libero10
+```
+
+Ten-step smoke run and checkpoint creation:
+
+```bash
+WANDB_MODE=disabled torchrun --standalone --nnodes 1 --nproc-per-node 8 \
+  scripts/train.py \
+  --config configs/vla_jepa/vla_jepa_qwen3vl_2b_libero_10_finetune.py \
+  --work-dir work_dirs/vla_jepa_libero10_smoke \
+  --cfg-options runner.max_steps=10 runner.save_iter_interval=10
+```
+
+Resume the same run through step 20:
+
+```bash
+WANDB_MODE=disabled torchrun --standalone --nnodes 1 --nproc-per-node 8 \
+  scripts/train.py \
+  --config configs/vla_jepa/vla_jepa_qwen3vl_2b_libero_10_finetune.py \
+  --work-dir work_dirs/vla_jepa_libero10_smoke \
+  --resume-from \
+  work_dirs/vla_jepa_libero10_smoke/checkpoints/latest-checkpoint.pt \
+  --cfg-options runner.max_steps=20 runner.save_iter_interval=10
+```
+
+One rollout for every LIBERO-10 task:
+
+```bash
+WANDB_MODE=disabled torchrun --standalone --nnodes 1 --nproc-per-node 8 \
+  scripts/eval.py \
+  --config configs/vla_jepa/vla_jepa_qwen3vl_2b_libero_10_finetune.py \
+  --ckpt-path \
+  work_dirs/vla_jepa_libero10_smoke/checkpoints/latest-checkpoint.pt \
+  --cfg-options eval.num_trials_per_task=1
+```
+
 ## Validation Record
 
 ### Core component milestone
@@ -97,9 +160,36 @@ Executed:
 pytest -q test/test_models/test_vla_jepa.py
 ```
 
-Result: `6 passed`. The two warnings are upstream deprecations from timm's
+Result after adding config and incomplete-window coverage: `8 passed`. The two
+warnings are upstream deprecations from timm's
 legacy import path and PyTorch's legacy SDPA context manager; neither changes
 the tested result.
+
+Built `DistributedRepeatingDataset` from the real LIBERO-10 mount, fetched one
+sample, and ran the configured `DictCollator`. The checked batch shapes were:
+
+```text
+states:                 [1, 8]
+actions:                [1, 7, 7]
+images:                 [1, 392, 1536]
+img_masks:              [1, 2]
+pixel_values_videos:    [1, 2, 8, 3, 256, 256]
+frame_masks:            [1, 8]
+lang_tokens:            [1, 128]
+image_grid_thw:         [1, 2, 3]
+```
+
+This check exposed and fixed a mask-alignment bug in the first implementation:
+after reducing 16 view-major temporal frames to two current Qwen images, the
+transform must also reduce `img_masks` from 16 entries to two.
+
+Environment snapshot during implementation:
+
+- The mounted LIBERO-10 dataset is readable and contains 388 parquet files,
+  776 videos, and the required v2.1 metadata.
+- Eight A100 80 GB GPUs are present, but unrelated running jobs currently
+  leave only approximately 19-22 GiB free on each GPU. No process was stopped
+  or modified by this work.
 
 ### Remaining validation sequence
 
