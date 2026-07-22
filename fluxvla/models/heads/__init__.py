@@ -28,6 +28,11 @@ try:
         FlowMatchingInferenceHead  # noqa: F401, F403
 except ImportError:
     pass
+try:
+    from .residual_flow_matching_inference_head import \
+        ResidualFlowMatchingInferenceHead  # noqa: F401, F403
+except ImportError:
+    pass
 from .llava_action_head import LlavaActionHead  # noqa: F401, F403
 from .openvla_head import OpenVLAHead  # noqa: F401, F403
 

@@ -98,11 +98,6 @@ mods = [
     'diffusers', 'mmengine', 'peft', 'timm', 'fluxvla',
     'fluxvla.transforms.utils',
     'fluxvla.transforms.transform_inputs',
-    'fluxvla.datasets.rlds_dataset',
-    'fluxvla.datasets.utils.droid_utils',
-    'fluxvla.ops.cuda.gemma_rotary_embedding.gemma_rotary_embedding',
-    'fluxvla.ops.cuda.rotary_pos_embedding.rotary_pos_embedding',
-    'fluxvla.ops.cuda.matmul_bias.matmul_bias',
 ]
 for name in mods:
     mod = importlib.import_module(name)

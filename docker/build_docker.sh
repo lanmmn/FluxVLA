@@ -282,7 +282,7 @@ if old not in s:
 setup_py.write_text(s.replace(old, new))
 PY
 cd /tmp/flash-attention
-python3 -m pip wheel --no-build-isolation --wheel-dir /wheelhouse .
+python3 -m pip wheel --no-build-isolation --no-deps --wheel-dir /wheelhouse .
 '
 
     if [ "${DRY_RUN}" != "1" ]; then
@@ -324,10 +324,24 @@ build_ros() {
 
 build_ros_fa() {
     prepare_build_env
+    FLASH_ATTN_MAX_JOBS="${FLUXVLA_FLASH_ATTN_MAX_JOBS:-1}"
+    FLASH_ATTN_WHEEL="${FLUXVLA_FLASH_ATTN_WHEEL:-}"
+
+    stage_wheelhouse
+    trap cleanup_wheelhouse EXIT
+
+    if [ -z "${FLASH_ATTN_WHEEL}" ] && [ -d "${REPO_ROOT}/docker/.wheelhouse" ]; then
+        first_wheel="$(find "${REPO_ROOT}/docker/.wheelhouse" -maxdepth 1 -type f -name 'flash_attn-*.whl' | head -n 1 || true)"
+        if [ -n "${first_wheel}" ]; then
+            FLASH_ATTN_WHEEL="$(basename "${first_wheel}")"
+        fi
+    fi
 
     print_header "Building FluxVLA Orin ROS + FlashAttention" "orin-ros-fa"
     build_image "${SCRIPT_DIR}/Dockerfile.orin" "orin-ros-fa" \
-        --target "ros-fa"
+        --target "ros-fa" \
+        --build-arg "FLASH_ATTN_MAX_JOBS=${FLASH_ATTN_MAX_JOBS}" \
+        --build-arg "FLASH_ATTN_WHEEL=${FLASH_ATTN_WHEEL}"
 }
 
 cd "${REPO_ROOT}"
