@@ -37,6 +37,8 @@ from .teleop02_wbt_inference_runner import \
     Teleop02WbtInferenceRunner  # noqa: F401, F403
 from .teleop02_wbt_rtc_inference_runner import \
     Teleop02WbtRTCInferenceRunner  # noqa: F401, F403
+from .oli_rtc_inference_runner import \
+    OliRTCInferenceRunner  # noqa: F401, F403
 from .tron2_inference_runner import Tron2InferenceRunner  # noqa: F401, F403
 from .tron2_rtc_inference_runner import \
     Tron2RTCInferenceRunner  # noqa: F401, F403
