@@ -312,18 +312,16 @@ class DreamZeroHead(nn.Module):
                 0, self.scheduler.num_train_timesteps,
                 (actions.shape[0], actions.shape[1]))
         else:
-            timestep_action_id = timestep_id_block.repeat(
-                1,
-                1,
-                actions.shape[1] // (noise.shape[1] - 1) if
-                (noise.shape[1] - 1) > 0 else 1,
-            )
-            timestep_action_id = timestep_action_id.reshape(
-                timestep_action_id.shape[0], -1)
-            if timestep_action_id.shape[1] != actions.shape[1]:
-                timestep_action_id = torch.randint(
-                    0, self.scheduler.num_train_timesteps,
-                    (actions.shape[0], actions.shape[1]))
+            num_future_timesteps = timestep_id_block.shape[1]
+            if num_future_timesteps == 0:
+                raise ValueError(
+                    'Expected at least one future latent timestep.')
+            if actions.shape[1] % num_future_timesteps != 0:
+                raise ValueError(
+                    'Action horizon must be divisible by the number of future '
+                    'latent timesteps.')
+            timestep_action_id = timestep_id_block.repeat_interleave(
+                repeats=actions.shape[1] // num_future_timesteps, dim=1)
 
         timestep_action = self.scheduler.timesteps[timestep_action_id].to(
             device)
