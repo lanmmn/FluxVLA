@@ -38,6 +38,20 @@ from ..utils import (build_evaluator_from_cfg, build_lr_scheduler_from_cfg,
 overwatch = initialize_overwatch(__name__)
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
 class BaseTrainRunner(ABC):
     """Basic class for training VLA models.
     This class is designed to be subclassed and should not be used directly.
@@ -171,6 +185,14 @@ class BaseTrainRunner(ABC):
         self.optimizer_state_loaded = False
         self.num_training_steps = None
         self._active_dataloader = None
+        self.nsys_start_step = _env_int('FLUXVLA_NSYS_START_STEP', -1)
+        self.nsys_num_steps = max(
+            0, _env_int('FLUXVLA_NSYS_NUM_STEPS', 0))
+        self.nsys_all_ranks = _env_flag('FLUXVLA_NSYS_ALL_RANKS')
+        self.nsys_window_active = False
+        self.nsys_window_finished = False
+        self.nvtx_enabled = _env_flag(
+            'FLUXVLA_NVTX') or self.nsys_num_steps > 0
 
         # Lightweight Validation
         assert (
@@ -633,19 +655,69 @@ class BaseTrainRunner(ABC):
                 self.current_epoch += 1
                 dataloader_iter = None
 
+    def _rank(self) -> int:
+        if dist.is_available() and dist.is_initialized():
+            return dist.get_rank()
+        return 0
+
+    def _profile_this_rank(self) -> bool:
+        return self.nsys_all_ranks or self._rank() == 0
+
+    def _nvtx_range(self, name: str):
+        if self.nvtx_enabled and torch.cuda.is_available():
+            return torch.cuda.nvtx.range(name)
+        return contextlib.nullcontext()
+
+    def _sync_profile_boundary(self) -> None:
+        if dist.is_available() and dist.is_initialized():
+            dist.barrier()
+
+    def _maybe_start_nsys(self) -> None:
+        if (self.nsys_num_steps <= 0 or self.nsys_start_step < 0
+                or self.nsys_window_active or self.nsys_window_finished
+                or self.metric.global_step != self.nsys_start_step):
+            return
+
+        self._sync_profile_boundary()
+        if self._profile_this_rank() and torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.profiler.start()
+        self._sync_profile_boundary()
+        self.nsys_window_active = True
+
+    def _maybe_stop_nsys(self) -> None:
+        if not self.nsys_window_active:
+            return
+
+        end_step = self.nsys_start_step + self.nsys_num_steps
+        if self.metric.global_step < end_step:
+            return
+
+        self._sync_profile_boundary()
+        if self._profile_this_rank() and torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.profiler.stop()
+        self._sync_profile_boundary()
+        self.nsys_window_active = False
+        self.nsys_window_finished = True
+
     def _run_accumulated_training_step(self, dataloader, dataloader_iter,
                                        sampler):
         """Run one optimizer step made of one or more micro-batches."""
         losses = []
         for micro_step in range(self.grad_accumulation_steps):
-            batch, dataloader_iter = self._next_batch(dataloader,
-                                                      dataloader_iter, sampler)
+            with self._nvtx_range(f'MICRO_{micro_step:02d}/DATA_WAIT'):
+                batch, dataloader_iter = self._next_batch(
+                    dataloader, dataloader_iter, sampler)
             should_step = micro_step == self.grad_accumulation_steps - 1
             # Skip the DDP/FSDP gradient all-reduce on non-final
             # micro-steps; gradients are synchronized only once when the
             # accumulated optimizer step is taken.
-            with self._grad_sync_context(should_sync=should_step):
-                loss = self._training_step(batch, should_step=should_step)
+            with self._nvtx_range(
+                    f'MICRO_{micro_step:02d}/TRAIN_SYNC_{int(should_step)}'):
+                with self._grad_sync_context(should_sync=should_step):
+                    loss = self._training_step(
+                        batch, should_step=should_step)
             losses.append(loss.detach())
         mean_loss = torch.stack(losses).mean()
         return float(mean_loss.item()), dataloader_iter
@@ -682,8 +754,12 @@ class BaseTrainRunner(ABC):
             epoch_step_count = 0
 
             while self.metric.global_step < self.max_steps:
-                loss, dataloader_iter = self._run_accumulated_training_step(
-                    dataloader, dataloader_iter, sampler)
+                self._maybe_start_nsys()
+                with self._nvtx_range(
+                        f'OPTIMIZER_STEP_{self.metric.global_step:06d}'):
+                    loss, dataloader_iter = \
+                        self._run_accumulated_training_step(
+                            dataloader, dataloader_iter, sampler)
                 self._loss_accumulator.append(loss)
                 epoch_step_count += 1
 
@@ -692,6 +768,7 @@ class BaseTrainRunner(ABC):
                     global_step=self.metric.global_step + 1,
                     epoch=self.current_epoch,
                     lr=self._get_log_lr())
+                self._maybe_stop_nsys()
                 progress.set_description(self.metric.push(), refresh=False)
                 progress.update()
                 if (self.evaluator is not None
@@ -858,24 +935,28 @@ class BaseTrainRunner(ABC):
 
     def _training_step(self, batch, should_step: bool = True) -> torch.Tensor:
         """Execute single training step: forward, backward, optimize."""
-        self.lr_scheduler.prepare_step(self)
-        batch = self._prepare_batch(
-            batch, self.device_id, self.mixed_precision_dtype
-            if self.enable_mixed_precision_training else None)
+        with self._nvtx_range('LR_PREPARE'):
+            self.lr_scheduler.prepare_step(self)
+        with self._nvtx_range('H2D_AND_PREPARE'):
+            batch = self._prepare_batch(
+                batch, self.device_id, self.mixed_precision_dtype
+                if self.enable_mixed_precision_training else None)
         if ('sample_weight' in batch
                 and not self._vla_accepts_kwarg('sample_weight')):
             batch = dict(batch)
             batch.pop('sample_weight')
-        with torch.autocast(
-                'cuda',
-                dtype=self.mixed_precision_dtype,
-                enabled=self.enable_mixed_precision_training):
-            output: CausalLMOutputWithPast = self.vla(**batch)
-            loss = output['loss']
-            loss_metrics = self._collect_output_loss_metrics(output)
+        with self._nvtx_range('FORWARD'):
+            with torch.autocast(
+                    'cuda',
+                    dtype=self.mixed_precision_dtype,
+                    enabled=self.enable_mixed_precision_training):
+                output: CausalLMOutputWithPast = self.vla(**batch)
+                loss = output['loss']
+                loss_metrics = self._collect_output_loss_metrics(output)
 
         self.metric.commit(loss=loss, **loss_metrics)
-        (loss / self.grad_accumulation_steps).backward()
+        with self._nvtx_range('BACKWARD'):
+            (loss / self.grad_accumulation_steps).backward()
 
         # Commit per-dataset metrics
         if overwatch.is_rank_zero() and all(k in output for k in [
@@ -891,21 +972,28 @@ class BaseTrainRunner(ABC):
             return loss.detach()
 
         # Gradient step with fallback on optimizer state mismatch
-        self.clip_grad_norm()
+        with self._nvtx_range('GRAD_CLIP'):
+            self.clip_grad_norm()
         try:
-            self.optimizer.step()
+            with self._nvtx_range('ADAMW_STEP'):
+                self.optimizer.step()
         except RuntimeError as e:
             if 'size' in str(e).lower() or 'shape' in str(e).lower():
-                self._reinit_optimizer()
-                self.optimizer.step()
+                with self._nvtx_range('REINIT_OPTIMIZER'):
+                    self._reinit_optimizer()
+                with self._nvtx_range('ADAMW_STEP_RETRY'):
+                    self.optimizer.step()
             else:
                 raise
-        self.lr_scheduler.step(self)
-        self.optimizer.zero_grad()
+        with self._nvtx_range('LR_SCHEDULER'):
+            self.lr_scheduler.step(self)
+        with self._nvtx_range('ZERO_GRAD'):
+            self.optimizer.zero_grad()
 
         # Custom hook for subclasses
         if hasattr(self, '_custom_training_step'):
-            custom_loss = self._custom_training_step(batch, output, loss)
+            with self._nvtx_range('CUSTOM_TRAINING_STEP'):
+                custom_loss = self._custom_training_step(batch, output, loss)
             if custom_loss is not None:
                 loss = loss.detach().new_tensor(custom_loss)
 
