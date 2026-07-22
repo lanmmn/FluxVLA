@@ -36,8 +36,58 @@ runner = _deepcopy(_base_globals['runner'])
 inference_model = _deepcopy(_base_globals['inference_model'])
 inference = _deepcopy(_base_globals['inference'])
 
+_task_descriptions = dict(inference['task_descriptions'])
+if '0' in _task_descriptions:
+    if '1' in _task_descriptions:
+        raise ValueError('Cannot reserve prompt 0: prompt 1 already exists')
+    _task_descriptions['1'] = _task_descriptions.pop('0')
+inference['task_descriptions'] = _task_descriptions
+
+# Captured from /joint/state at 2026-07-22 09:03 CST using the median of 20
+# samples (maximum per-joint standard deviation: 4.96e-5 rad). The final two
+# values are the data-pipeline hand-closed flags; both hands were open.
+_initial_state = [
+    -0.138400,
+    -0.021600,
+    -0.046600,
+    0.123400,
+    -0.057983,
+    -0.000304,
+    -0.083100,
+    -0.082700,
+    -0.138400,
+    0.131600,
+    -0.093793,
+    0.081237,
+    -0.001800,
+    -0.009472,
+    -0.090990,
+    -0.077700,
+    0.177800,
+    0.124100,
+    0.239197,
+    -0.315030,
+    -0.380800,
+    0.152800,
+    0.192900,
+    0.055200,
+    0.520800,
+    -0.165896,
+    -0.092670,
+    -0.668100,
+    -0.232800,
+    -0.143500,
+    0.066000,
+    0.0,
+    0.0,
+]
+
 inference.update(
     type='OliRTCInferenceRunner',
+    default_prompt_id='1',
+    zero_prompt_resets=True,
+    initial_state=_initial_state,
+    reset_duration_sec=5.0,
     async_remaining_actions_threshold=8,
     rtc_config=dict(
         enabled=True,
@@ -46,4 +96,5 @@ inference.update(
     ),
 )
 
-del _base_candidates, _base_globals, _base_path, _deepcopy, _Path
+del (_base_candidates, _base_globals, _base_path, _deepcopy, _initial_state,
+     _task_descriptions, _Path)

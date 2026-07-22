@@ -50,6 +50,9 @@ class OliInferenceRunner(BaseInferenceRunner):
                  default_prompt_id: str = None,
                  default_execution_count: int = 1,
                  apply_jpeg_compression: bool = False,
+                 zero_prompt_resets: bool = False,
+                 initial_state=None,
+                 reset_duration_sec: float = 5.0,
                  *args,
                  **kwargs):
         self.execute_horizon = execute_horizon
@@ -57,10 +60,23 @@ class OliInferenceRunner(BaseInferenceRunner):
         self.default_prompt_id = default_prompt_id
         self.default_execution_count = int(default_execution_count)
         self.apply_jpeg_compression = bool(apply_jpeg_compression)
+        self.zero_prompt_resets = bool(zero_prompt_resets)
+        self.initial_state = (None if initial_state is None else np.asarray(
+            initial_state, dtype=np.float64))
+        self.reset_duration_sec = float(reset_duration_sec)
         if self.execute_horizon is not None and self.execute_horizon <= 0:
             raise ValueError('execute_horizon must be positive or None')
         if self.default_execution_count <= 0:
             raise ValueError('default_execution_count must be positive')
+        if self.initial_state is not None:
+            if self.initial_state.shape != (33, ):
+                raise ValueError(
+                    'Oli initial_state must contain 31 joints and 2 hand '
+                    f'flags, got shape {self.initial_state.shape}')
+            if not np.all(np.isfinite(self.initial_state)):
+                raise ValueError('Oli initial_state must be finite')
+        if self.reset_duration_sec <= 0:
+            raise ValueError('reset_duration_sec must be positive')
 
         if 'camera_names' not in kwargs or kwargs['camera_names'] is None:
             kwargs['camera_names'] = ['head']
@@ -91,6 +107,14 @@ class OliInferenceRunner(BaseInferenceRunner):
             raise ValueError(
                 f'default_prompt_id {self.default_prompt_id!r} is not in '
                 f'task_descriptions={list(self.task_descriptions)}')
+        if self.zero_prompt_resets:
+            if self.initial_state is None:
+                raise ValueError(
+                    'initial_state is required when zero_prompt_resets=True')
+            if self.default_prompt_id == '0':
+                raise ValueError(
+                    'default_prompt_id cannot be 0 when 0 is the reset '
+                    'command')
 
         self._running = True
         self._dt = 1.0 / self.publish_rate
@@ -126,10 +150,12 @@ class OliInferenceRunner(BaseInferenceRunner):
             return [description] * self.default_execution_count
 
         prompt_ids = ', '.join(self.task_descriptions)
+        reset_hint = '; 0 resets robot' if self.zero_prompt_resets else ''
         while self._running:
             try:
                 value = input(f'Prompt ID [{self.default_prompt_id}] '
-                              f'(available: {prompt_ids}; q to quit): ')
+                              f'(available: {prompt_ids}{reset_hint}; '
+                              'q to quit): ')
             except (EOFError, KeyboardInterrupt):
                 self._running = False
                 return []
@@ -139,6 +165,10 @@ class OliInferenceRunner(BaseInferenceRunner):
                 return []
             if prompt_id == '':
                 prompt_id = self.default_prompt_id
+            if prompt_id == '0' and self.zero_prompt_resets:
+                self._move_to_prepare_pose()
+                print('[reset] Oli initial state restored.', flush=True)
+                continue
             if prompt_id in self.task_descriptions:
                 break
             print(
@@ -301,8 +331,20 @@ class OliInferenceRunner(BaseInferenceRunner):
         return sent_steps
 
     def _move_to_prepare_pose(self):
-        """No-op for Oli (teleop-controlled robot)."""
-        pass
+        """Smoothly restore the configured 33-dim Oli initial state."""
+        if self.initial_state is None:
+            raise RuntimeError('No Oli initial_state is configured')
+        if self.disable_puppet_arm:
+            print(
+                '[reset] disable_puppet_arm=True; reset not sent.', flush=True)
+            return self.initial_state.copy()
+        target = self.ros_operator.gohome(
+            self.initial_state,
+            duration_sec=self.reset_duration_sec,
+            publish_rate=self.publish_rate,
+            running_flag_fn=lambda: self._running)
+        self.observation_window = None
+        return target
 
     def cleanup(self):
         """Clean up resources."""

@@ -802,10 +802,72 @@ class OliOperator(BaseOperator):
             raise ValueError('Oli gripper target must contain left and right')
         self._send_hands(float(values[0]), float(values[1]))
 
-    def gohome(self):
-        """Oli preparation is managed externally by the WBT controller."""
-        self.clear_observation_queues()
-        return None
+    def gohome(self,
+               initial_state=None,
+               duration_sec=5.0,
+               publish_rate=30.0,
+               running_flag_fn=None):
+        """Smoothly move the MROS robot to a configured 33-dim state.
+
+        The reset state contains 31 joint targets and two hand-closed flags.
+        Base x/y/yaw are held at the operator's current accumulated target;
+        they are not part of ``/joint/state`` and therefore are not guessed.
+        """
+        if initial_state is None:
+            raise ValueError('Oli gohome requires a 33-dim initial_state')
+        if self.control_backend != 'mros':
+            raise NotImplementedError(
+                'Oli configured-state reset currently requires MROS')
+
+        target = np.asarray(initial_state, dtype=np.float64)
+        if target.shape != (33, ) or not np.all(np.isfinite(target)):
+            raise ValueError(
+                'Oli initial_state must be a finite 33-dim vector')
+        duration_sec = float(duration_sec)
+        publish_rate = float(publish_rate)
+        if duration_sec <= 0 or publish_rate <= 0:
+            raise ValueError(
+                'Reset duration and publish rate must be positive')
+
+        joint_msg = self._read_mros_message(
+            self.joint_state_subscriber, timeout=1.0)
+        if joint_msg is None:
+            raise RuntimeError(
+                f'No joint state received from {self.joint_state_topic}; '
+                'reset was not started')
+        start_q = np.asarray(joint_msg.q, dtype=np.float64)
+        if start_q.size < 31 or not np.all(np.isfinite(start_q[:31])):
+            raise RuntimeError('Invalid joint state; reset was not started')
+        start_q = start_q[:31].copy()
+
+        steps = max(1, int(round(duration_sec * publish_rate)))
+        period = 1.0 / publish_rate
+        next_publish_time = time.monotonic()
+        completed = False
+        for step in range(1, steps + 1):
+            if running_flag_fn is not None and not running_flag_fn():
+                break
+            ratio = step / steps
+            blend = ratio**3 * (10.0 + ratio * (-15.0 + 6.0 * ratio))
+            action = np.zeros(42, dtype=np.float64)
+            action[:31] = start_q + blend * (target[:31] - start_q)
+            action[31:34] = [0.0, 0.0, self._accum_base_pos[2]]
+            action[34:40] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+            action[40:42] = target[31:33]
+            self.send_action(action)
+
+            next_publish_time += period
+            time.sleep(max(0.0, next_publish_time - time.monotonic()))
+        else:
+            completed = True
+
+        if not completed:
+            raise RuntimeError('Oli initial-state reset was interrupted')
+        print(
+            f'[reset] Reached configured Oli initial state in '
+            f'{duration_sec:.1f}s ({steps} steps).',
+            flush=True)
+        return target.copy()
 
     def close(self):
         """Stop local execution and close the legacy WebSocket if present."""
