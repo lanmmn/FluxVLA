@@ -48,11 +48,8 @@ model = dict(
         state_dim=64,
         hidden_size=1024,
         input_embedding_dim=1536,
-        num_layers=1,
-        num_heads=4,
         num_inference_timesteps=4,
         num_steps=32,
-        traj_length=10,  # no use param
         action_dim=64,  # 42 raw dims padded to 64
         ori_action_dim=42,
         rtc_training_config=dict(
@@ -81,18 +78,10 @@ inference_model = dict(
         state_dim=64,
         hidden_size=1024,
         input_embedding_dim=1536,
-        num_layers=1,
-        num_heads=4,
         num_inference_timesteps=4,
         num_steps=32,
-        traj_length=10,  # no use param
         action_dim=64,  # 42 raw dims padded to 64
-        ori_action_dim=42,
-        rtc_training_config=dict(
-            enabled=True,
-            max_delay=7,
-            distribution='exponential',  # 'exponential'（推荐）或 'uniform'
-        )),
+        ori_action_dim=42),
 )
 
 train_dataloader = dict(
@@ -156,8 +145,7 @@ runner = dict(
     max_epochs=30,
     save_epoch_interval=2,
     max_keep_ckpts=15,
-    learning_rate=2e-5,
-    weight_decay=0.0,
+    optimizer=dict(lr=2e-5, type='AdamW', weight_decay=0.0),
     max_grad_norm=1.0,
     sampler=None,
     tokenizer=dict(
@@ -179,8 +167,7 @@ runner = dict(
         run_dir='work_dirs',
         grad_accumulation_steps=1,
         window_size=1),
-    lr_scheduler_type='constant',
-    warmup_ratio=0.0,
+    lr_scheduler=dict(type='constant'),
     enable_gradient_checkpointing=False,
     enable_mixed_precision_training=True,
     mixed_precision_dtype='bf16',
