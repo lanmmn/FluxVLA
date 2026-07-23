@@ -186,7 +186,7 @@ train_dataloader = dict(
 
 runner = dict(
     type='FSDPTrainRunner',
-    max_steps=30000,
+    # max_steps=30000,
     optimizer=dict(
         type='AdamW',
         lr=1e-4,
@@ -229,7 +229,7 @@ runner = dict(
         type='linear-warmup+cosine-decay',
         warmup_ratio=1 / 6,
     ),
-    grad_accumulation_steps=8,
+    grad_accumulation_steps=1,
     save_iter_interval=10000,
     max_keep_ckpts=3,
     enable_gradient_checkpointing=True,
