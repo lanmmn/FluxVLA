@@ -230,7 +230,10 @@ class FlowMatchingHead(nn.Module):
                      output_dim=1024,
                      positional_embeddings=None),
                  ori_action_dim=None,
-                 rtc_training_config=None):
+                 rtc_training_config=None,
+                 done_loss_weight: float = 1.0,
+                 *args,
+                 **kwargs):
         super().__init__()
         self.rtc_training_config = rtc_training_config
         self.hidden_size = hidden_size
@@ -275,6 +278,7 @@ class FlowMatchingHead(nn.Module):
                                                    self.input_embedding_dim)
             nn.init.normal_(self.position_embedding.weight, mean=0.0, std=0.02)
         self.ori_action_dim = ori_action_dim
+        self.done_loss_weight = done_loss_weight
 
     def forward(self, input_features: torch.Tensor, states: torch.Tensor,
                 attention_mask: torch.Tensor, embodiment_ids: torch.Tensor,

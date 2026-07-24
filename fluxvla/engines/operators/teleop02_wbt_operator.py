@@ -265,8 +265,10 @@ class Teleop02WbtOperator:
                  head_rgb_topic='/head/color/image_raw/compressed',
                  left_wrist_rgb_topic=(
                      '/left_wrist_camera/color/image_raw/compressed'),
+                 use_left_wrist_camera=True,
                  joint_state_topic='/joint/state',
                  finger_state_topic='/brainco1/hand/state',
+                 use_finger_state=True,
                  finger_cmd_topic='/brainco1/hand/cmd_vla',
                  teleop_wbt_topic='/teleop_cmd_WBT',
                  cmd_vel_topic='/sdk_cmd_vel_vla',
@@ -281,8 +283,13 @@ class Teleop02WbtOperator:
             head_rgb_topic (str): Topic for head camera compressed image.
             left_wrist_rgb_topic (str): Topic for left wrist camera
                 compressed image.
+            use_left_wrist_camera (bool): Whether to subscribe to and require
+                the left wrist camera. Defaults to True.
             joint_state_topic (str): Topic for joint state feedback.
             finger_state_topic (str): Topic for finger state feedback.
+            use_finger_state (bool): Whether to subscribe to physical hand
+                feedback. When False, the legacy 2-dim hand state is derived
+                from the most recently executed model hand action.
             finger_cmd_topic (str): Topic for finger commands.
             teleop_wbt_topic (str): Topic for WBT teleop commands
                 (TeleopMsg with joint_cmd + base_link anchor).
@@ -303,13 +310,19 @@ class Teleop02WbtOperator:
         """
         self.head_rgb_topic = head_rgb_topic
         self.left_wrist_rgb_topic = left_wrist_rgb_topic
+        self.use_left_wrist_camera = use_left_wrist_camera
         self.joint_state_topic = joint_state_topic
         self.finger_state_topic = finger_state_topic
+        self.use_finger_state = bool(use_finger_state)
         self.finger_cmd_topic = finger_cmd_topic
         self.teleop_wbt_topic = teleop_wbt_topic
         self.cmd_vel_topic = cmd_vel_topic
         self.hand_state_dim = int(hand_state_dim)
         self.hand_action_dim = int(hand_action_dim)
+        if not self.use_finger_state and self.hand_state_dim != 2:
+            raise ValueError(
+                'use_finger_state=False requires hand_state_dim=2 so hand '
+                'state can be reconstructed from the last model command')
         self.hand_command_scale = float(hand_command_scale)
         self.binarize_hand_action = bool(binarize_hand_action)
         self.finger_force_levels = (None
@@ -345,12 +358,16 @@ class Teleop02WbtOperator:
         # Subscribers
         self.color_subscriber = mros.subscribe(self.head_rgb_topic,
                                                CompressedImage, None)
-        self.left_wrist_color_subscriber = mros.subscribe(
-            self.left_wrist_rgb_topic, CompressedImage, None)
+        self.left_wrist_color_subscriber = None
+        if self.use_left_wrist_camera:
+            self.left_wrist_color_subscriber = mros.subscribe(
+                self.left_wrist_rgb_topic, CompressedImage, None)
         self.joint_state_subscriber = mros.subscribe(self.joint_state_topic,
                                                      JointState, None)
-        self.finger_state_subscriber = mros.subscribe(self.finger_state_topic,
-                                                      Float32Array, None)
+        self.finger_state_subscriber = None
+        if self.use_finger_state:
+            self.finger_state_subscriber = mros.subscribe(
+                self.finger_state_topic, Float32Array, None)
 
         # Publishers
         self.teleop_wbt_publisher = mros.advertise(self.teleop_wbt_topic,
@@ -360,9 +377,11 @@ class Teleop02WbtOperator:
         print(
             '[mros] Teleop02WbtOperator subscribed to '
             f'head={self.head_rgb_topic}, '
-            f'left_wrist={self.left_wrist_rgb_topic}, '
+            f'left_wrist='
+            f'{self.left_wrist_rgb_topic if self.use_left_wrist_camera else "disabled"}, '
             f'joint_state={self.joint_state_topic}, '
-            f'finger_state={self.finger_state_topic}',
+            f'finger_state='
+            f'{self.finger_state_topic if self.use_finger_state else "model_command_feedback"}',
             flush=True)
 
     def _observation_hand_state(self):
@@ -494,8 +513,8 @@ class Teleop02WbtOperator:
     def get_frame(self, timeout=0.05):
         """Get synchronized observation from all sensors.
 
-        Reads head camera image, left wrist camera image, joint states, and
-        finger states.
+        Reads head camera image, optional left wrist camera image, joint
+        states, and finger states.
         Returns combined 33-dim state vector (31 joints + 2 hand_closed) or
         43-dim state vector (31 joints + 12 raw BrainCo finger states).
 
@@ -517,15 +536,17 @@ class Teleop02WbtOperator:
                 f'No head image received from {self.head_rgb_topic}')
             return False
 
-        # (2) Read left wrist image
-        left_wrist_img = self._read_compressed_rgb_image(
-            self.left_wrist_color_subscriber, timeout)
-        if left_wrist_img is None:
-            self._warn_get_frame_missing(
-                'left_wrist_img',
-                'No left wrist image received from '
-                f'{self.left_wrist_rgb_topic}')
-            return False
+        # (2) Read left wrist image only when this camera is enabled.
+        left_wrist_img = None
+        if self.use_left_wrist_camera:
+            left_wrist_img = self._read_compressed_rgb_image(
+                self.left_wrist_color_subscriber, timeout)
+            if left_wrist_img is None:
+                self._warn_get_frame_missing(
+                    'left_wrist_img',
+                    'No left wrist image received from '
+                    f'{self.left_wrist_rgb_topic}')
+                return False
 
         # (3) Read joint state
         joint_state_msg = None
@@ -551,19 +572,22 @@ class Teleop02WbtOperator:
             return False
         joint_state = joint_state[:31]
 
-        # (4) Read finger state
-        finger_state_msg = None
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            finger_state_msg = self.finger_state_subscriber.readMsgRT()
-            if finger_state_msg is not None:
-                break
-            time.sleep(0.005)
+        # (4) Read physical finger state when enabled. The legacy 2-dim
+        # state otherwise comes from the last executed model command.
+        if self.use_finger_state:
+            finger_state_msg = None
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                finger_state_msg = self.finger_state_subscriber.readMsgRT()
+                if finger_state_msg is not None:
+                    break
+                time.sleep(0.005)
 
-        if finger_state_msg is not None:
-            finger_state = np.asarray(finger_state_msg.data, dtype=np.float32)
-            if finger_state.size >= 12:
-                self.last_finger_state = finger_state[:12].copy()
+            if finger_state_msg is not None:
+                finger_state = np.asarray(
+                    finger_state_msg.data, dtype=np.float32)
+                if finger_state.size >= 12:
+                    self.last_finger_state = finger_state[:12].copy()
 
         # Combine into 33-dim legacy state or 43-dim raw-hand state.
         state = np.concatenate([joint_state, self._observation_hand_state()])

@@ -111,11 +111,13 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
             kwargs['camera_names'] = ['head', 'left_wrist']
 
         if 'operator' not in kwargs or kwargs['operator'] is None:
+            use_left_wrist_camera = len(kwargs['camera_names']) > 1
             kwargs['operator'] = {
                 'type': 'Teleop02WbtOperator',
                 'head_rgb_topic': '/head/color/image_raw/compressed',
                 'left_wrist_rgb_topic':
                 '/left_wrist_camera/color/image_raw/compressed',
+                'use_left_wrist_camera': use_left_wrist_camera,
                 'joint_state_topic': '/joint/state',
                 'finger_state_topic': '/brainco1/hand/state',
                 'finger_cmd_topic': '/brainco1/hand/cmd',
@@ -232,11 +234,12 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
             '[warm-up] First image received. Starting model warm-up...',
             flush=True)
 
-        warmup_obs = {'qpos': state}
-        imgs = [head_img, left_wrist_img]
-        for i, camera_name in enumerate(self.camera_names):
-            if i < len(imgs):
-                warmup_obs[camera_name] = imgs[i]
+        warmup_obs = {
+            'qpos': state,
+            self.camera_names[0]: head_img,
+        }
+        if left_wrist_img is not None and len(self.camera_names) > 1:
+            warmup_obs[self.camera_names[1]] = left_wrist_img
         warmup_obs['task_description'] = instruction
 
         dataset_start = time.perf_counter()
@@ -489,8 +492,8 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
         """Update observation window with latest sensor data.
 
         Returns:
-            Dict: Latest observation with 'qpos' (33d), 'head' image, and
-            'left_wrist' image.
+            Dict: Latest observation with 'qpos' (33d), the head image, and
+                the optional left wrist image.
         """
         if self.observation_window is None:
             window_init_start = time.perf_counter()
@@ -518,9 +521,10 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
         # Apply JPEG compression to match training conditions
         stage_start = time.perf_counter()
         head_img = self._apply_jpeg_compression_rgb(head_img)
-        left_wrist_img = self._apply_jpeg_compression_rgb(left_wrist_img)
-
-        debug_images = {'head': head_img, 'left_wrist': left_wrist_img}
+        debug_images = {'head': head_img}
+        if left_wrist_img is not None:
+            left_wrist_img = self._apply_jpeg_compression_rgb(left_wrist_img)
+            debug_images['left_wrist'] = left_wrist_img
 
         self._dump_debug_jpeg_images(debug_images)
         # print(
@@ -531,8 +535,9 @@ class Teleop02WbtInferenceRunner(BaseInferenceRunner):
         observation = {
             'qpos': state,
             self.camera_names[0]: head_img,  # 'head'
-            self.camera_names[1]: left_wrist_img,  # 'left_wrist'
         }
+        if left_wrist_img is not None and len(self.camera_names) > 1:
+            observation[self.camera_names[1]] = left_wrist_img
 
         self.observation_window.append(observation)
         return self.observation_window[-1]
