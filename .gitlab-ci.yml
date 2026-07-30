@@ -1,0 +1,10 @@
+# This repository is used as a code mirror; GitLab CI is intentionally disabled.
+workflow:
+  rules:
+    - when: never
+
+disabled:
+  script:
+    - echo "GitLab CI is disabled for this repository."
+  rules:
+    - when: never
