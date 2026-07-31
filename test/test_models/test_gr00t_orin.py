@@ -11,7 +11,7 @@ os.environ['ATTN_IMPLEMENTATION'] = 'flash_attention_2'
 os.environ['TRANSFORMERS_ATTN_IMPLEMENTATION'] = 'flash_attention_2'
 
 import torch
-from mmengine import Config
+from mmengine import Config, DictAction
 from safetensors.torch import load_file
 
 torch.backends.cuda.enable_flash_sdp(True)
@@ -36,6 +36,12 @@ def parse_args():
     p.add_argument('--lang-len', type=int, default=600)
     p.add_argument('--image-token-id', type=int, default=None)
     p.add_argument('--image-tokens-per-view', type=int, default=256)
+    p.add_argument('--prompt', type=str, default=None)
+    p.add_argument(
+        '--cfg-options',
+        nargs='+',
+        action=DictAction,
+        help='Override config settings as key=value pairs.')
     p.add_argument('--seed', type=int, default=0)
     p.add_argument(
         '--device', default='cuda' if torch.cuda.is_available() else 'cpu')
@@ -81,6 +87,42 @@ def make_dummy_batch(device, batch_size, num_views, image_size, lang_len,
     }
 
 
+def apply_prompt_tokens(batch, cfg, prompt, device):
+    if prompt is None:
+        return None
+
+    from fluxvla.engines import build_transform_from_cfg
+
+    transforms = cfg.inference.dataset.transforms
+    prompt_cfg = None
+    for transform_cfg in transforms:
+        if transform_cfg.get('type') == 'ProcessPromptsWithImage':
+            prompt_cfg = transform_cfg.copy()
+            break
+    if prompt_cfg is None:
+        raise ValueError('Config inference.dataset.transforms has no '
+                         'ProcessPromptsWithImage transform')
+
+    tokenizer_cfg = prompt_cfg.setdefault('tokenizer', {})
+    if tokenizer_cfg.get('model_path') is None:
+        vlm_cfg = cfg.inference_model.get('vlm_backbone', {})
+        vlm_path = vlm_cfg.get('vlm_path')
+        if vlm_path is None:
+            raise ValueError('Cannot infer tokenizer model_path from '
+                             'cfg.inference_model.vlm_backbone.vlm_path')
+        tokenizer_cfg['model_path'] = vlm_path
+    prompt_cfg['return_text'] = True
+    transform = build_transform_from_cfg(prompt_cfg)
+    prompt_data = transform({'task_description': prompt})
+    lang_tokens = torch.as_tensor(
+        prompt_data['lang_tokens'], dtype=torch.long, device=device).unsqueeze(0)
+    lang_masks = torch.as_tensor(
+        prompt_data['lang_masks'], dtype=torch.bool, device=device).unsqueeze(0)
+    batch['lang_tokens'] = lang_tokens
+    batch['lang_masks'] = lang_masks
+    return prompt_data.get('text')
+
+
 def load_checkpoint_state(ckpt_path: Path):
     if ckpt_path.suffix == '.safetensors':
         return load_file(str(ckpt_path), device='cpu')
@@ -109,6 +151,8 @@ def main() -> int:
         return 1
 
     cfg = Config.fromfile(str(Path(args.config).expanduser().resolve()))
+    if args.cfg_options is not None:
+        cfg.merge_from_dict(args.cfg_options)
     cfg_key = 'model' if args.variant == 'baseline' else 'inference_model'
     if cfg_key not in cfg:
         print(f'ERROR: config missing {cfg_key}', file=sys.stderr)
@@ -150,15 +194,20 @@ def main() -> int:
                              args.image_size, args.lang_len, state_dim,
                              action_dim, image_token_id,
                              args.image_tokens_per_view)
+    prompt_text = apply_prompt_tokens(batch, cfg, args.prompt, device)
     image_token_count = int(
         (batch['lang_tokens']
          == image_token_id).sum().item()) if image_token_id is not None else 0
     print(
         f'image_token_id={image_token_id}, image_token_count={image_token_count}'
     )
+    print(f'lang_len={batch["lang_tokens"].shape[1]}')
+    if prompt_text is not None:
+        print(f'prompt_text={prompt_text}')
+        print(f'prompt_effective_tokens={int(batch["lang_masks"].sum().item())}')
 
     print(
-        f'Benchmark {args.variant} predict_action: warmup={args.warmup}, runs={args.predict_runs}, lang_len={args.lang_len}'
+        f'Benchmark {args.variant} predict_action: warmup={args.warmup}, runs={args.predict_runs}, lang_len={batch["lang_tokens"].shape[1]}'
     )
     times = []
     actions = None
