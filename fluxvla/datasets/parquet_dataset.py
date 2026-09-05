@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import inspect
 import json
 import os
 import shlex
@@ -23,7 +24,29 @@ from datasets.features import List as HFList
 from torch.utils.data import Dataset
 
 from datasets import concatenate_datasets, load_dataset
-from fluxvla.engines import DATASETS, build_transform_from_cfg
+from fluxvla.engines import DATASETS, TRANSFORMS, build_transform_from_cfg
+
+
+def _callable_accepts_kwarg(obj: Any, name: str) -> bool:
+    target = obj.__init__ if inspect.isclass(obj) else obj
+    try:
+        signature = inspect.signature(target)
+    except (TypeError, ValueError):
+        return False
+    return any(param.name == name
+               or param.kind == inspect.Parameter.VAR_KEYWORD
+               for param in signature.parameters.values())
+
+
+def _transform_accepts_kwarg(cfg: Dict[str, Any], name: str) -> bool:
+    transform_type = cfg.get('type')
+    if callable(transform_type):
+        return _callable_accepts_kwarg(transform_type, name)
+    if not isinstance(transform_type, str):
+        return False
+    with TRANSFORMS.switch_scope_and_registry(cfg.get('_scope_')) as registry:
+        transform_cls = registry.get(transform_type)
+    return _callable_accepts_kwarg(transform_cls, name)
 
 
 def _batched_cuda_tensor(value: Any) -> torch.Tensor:
@@ -644,7 +667,8 @@ class PrivateInferenceDataset:
         self.transforms = list()
         for transform in transforms:
             transform = dict(transform)
-            transform.setdefault('model_path', model_path)
+            if _transform_accepts_kwarg(transform, 'model_path'):
+                transform.setdefault('model_path', model_path)
             self.transforms.append(build_transform_from_cfg(transform))
         if isinstance(norm_stats, str):
             with open(norm_stats, 'r', encoding='utf-8') as f:

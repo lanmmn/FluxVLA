@@ -11,9 +11,11 @@ Usage::
 """
 from __future__ import annotations
 import io
+import re
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
@@ -29,6 +31,38 @@ def serialize_actions(actions: torch.Tensor) -> bytes:
     buf = io.BytesIO()
     np.save(buf, actions.cpu().numpy(), allow_pickle=False)
     return buf.getvalue()
+
+
+_SAFE_FILENAME = re.compile(r'[^A-Za-z0-9_.-]+')
+
+
+def _safe_filename(value: str) -> str:
+    safe = _SAFE_FILENAME.sub('_', value).strip('._')
+    return safe or 'image'
+
+
+def save_observation_images(obs: dict, output_dir: Path,
+                            request_index: int) -> int:
+    """Save image-like observation arrays as PNG files."""
+    import cv2
+
+    images = []
+    for key, value in obs.items():
+        if (isinstance(value, np.ndarray) and value.dtype == np.uint8
+                and value.ndim == 3 and value.shape[2] in (1, 3, 4)):
+            images.append((key, value))
+
+    if not images:
+        return 0
+
+    timestamp = time.strftime('%Y%m%d-%H%M%S')
+    request_dir = output_dir / f'{request_index:06d}_{timestamp}'
+    request_dir.mkdir(parents=True, exist_ok=True)
+    for key, image in images:
+        path = request_dir / f'{_safe_filename(str(key))}.png'
+        if not cv2.imwrite(str(path), image):
+            raise IOError(f'Failed to write input image: {path}')
+    return len(images)
 
 
 @dataclass
@@ -191,6 +225,8 @@ def create_server(
     port: int = 5555,
     device: str = 'cuda:0',
     mixed_precision_dtype=torch.bfloat16,
+    save_input_images_dir: str | None = None,
+    save_input_images_every: int = 1,
 ) -> PolicyServer:
     """Create a ZMQ server that wraps a VLA model.
 
@@ -203,10 +239,20 @@ def create_server(
         port: Bind port.
         device: CUDA device.
         mixed_precision_dtype: Dtype for autocast.
+        save_input_images_dir: Optional directory for raw input image dumps.
+        save_input_images_every: Save every Nth request when dumping is enabled.
     """
     torch_device = torch.device(device)
     vla.eval()
     vla.to(torch_device)
+    if save_input_images_every < 1:
+        raise ValueError('save_input_images_every must be >= 1')
+    image_dump_dir = (
+        Path(save_input_images_dir) if save_input_images_dir else None)
+    if image_dump_dir is not None:
+        image_dump_dir.mkdir(parents=True, exist_ok=True)
+        print(f'[VLAServer] Saving input images to {image_dump_dir}',
+              flush=True)
 
     lock = threading.Lock()
     total_requests = 0
@@ -221,6 +267,17 @@ def create_server(
 
         obs = _obs_dict if _obs_dict is not None else \
             ObsSerializer.from_bytes(obs_data)
+        with lock:
+            request_index = total_requests + 1
+        if (image_dump_dir is not None
+                and request_index % save_input_images_every == 0):
+            saved_count = save_observation_images(obs, image_dump_dir,
+                                                  request_index)
+            if saved_count:
+                print(
+                    f'[VLAServer] saved {saved_count} input image(s) '
+                    f'for req={request_index}',
+                    flush=True)
         denormalize_context = {}
         if isinstance(obs, dict) and obs.get('qpos') is not None:
             denormalize_context['state'] = np.asarray(

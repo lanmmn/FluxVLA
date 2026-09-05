@@ -34,11 +34,22 @@ def parse_args():
         default=None,
         choices=['inference', 'eval'],
         help='Config key to load dataset pipeline from')
+    parser.add_argument(
+        '--save-input-images-dir',
+        default=None,
+        help='Optional directory for dumping images received by the server')
+    parser.add_argument(
+        '--save-input-images-every',
+        type=int,
+        default=1,
+        help='Dump every Nth request when --save-input-images-dir is set')
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    if args.save_input_images_every < 1:
+        raise ValueError('--save-input-images-every must be >= 1')
 
     from mmengine import Config
 
@@ -133,6 +144,8 @@ def main():
         port=args.port,
         device=args.device,
         mixed_precision_dtype=dtype_map[args.dtype],
+        save_input_images_dir=args.save_input_images_dir,
+        save_input_images_every=args.save_input_images_every,
     )
     print(f'[serve] ZMQ server starting on tcp://{args.host}:{args.port}')
     try:
